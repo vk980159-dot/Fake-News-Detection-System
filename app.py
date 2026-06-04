@@ -46,6 +46,12 @@ st.markdown("""
 Check whether a news article is Fake or Real using Machine Learning.
 """)
 
+# Information Box
+st.info(
+    "⚠️ This model is trained on news articles only. "
+    "For best results, enter a complete news article."
+)
+
 # Input Area
 news = st.text_area(
     "📝 Paste News Article Here",
@@ -56,38 +62,73 @@ news = st.text_area(
 # Prediction Button
 if st.button("🔍 Analyze News", use_container_width=True):
 
+    # Empty Input Validation
     if news.strip() == "":
         st.warning("⚠️ Please enter news text first.")
+        st.stop()
+
+    # Minimum Word Validation
+    if len(news.split()) < 20:
+        st.warning(
+            "⚠️ Please enter a complete news article (minimum 20 words)."
+        )
+        st.stop()
+
+    cleaned_news = clean_text(news)
+
+    news_vector = vectorizer.transform([cleaned_news])
+
+    prediction = model.predict(news_vector)[0]
+
+    probability = model.predict_proba(news_vector)
+
+    confidence = max(probability[0]) * 100
+
+    # Prediction Result
+    st.markdown("## 📢 Prediction Result")
+
+    if prediction == 0:
+
+        st.error("🚨 Fake News Detected")
+
+        st.subheader("🤖 Why this prediction?")
+
+        st.write("""
+        • Sensational or misleading wording detected
+
+        • Similar patterns found in fake news dataset
+
+        • Unverified reporting style
+
+        • Language differs from trusted news articles
+        """)
 
     else:
-        cleaned_news = clean_text(news)
 
-        news_vector = vectorizer.transform([cleaned_news])
+        st.success("✅ Real News Detected")
 
-        prediction = model.predict(news_vector)
+        st.subheader("🤖 Why this prediction?")
 
-        probability = model.predict_proba(news_vector)
+        st.write("""
+        • Formal news reporting style
 
-        if prediction[0] == 0:
+        • Similar to trusted news articles
 
-            confidence = probability[0][0] * 100
+        • Consistent language patterns
 
-            st.error("🚨 Fake News Detected")
+        • Matches characteristics of verified news content
+        """)
 
-            st.progress(int(confidence))
+    # Confidence Score
+    st.subheader("📊 Confidence Score")
 
-            st.write(f"Confidence: {confidence:.2f}%")
+    st.progress(confidence / 100)
 
-        else:
-
-            confidence = probability[0][1] * 100
-
-            st.success("✅ Real News Detected")
-
-            st.progress(int(confidence))
-
-            st.write(f"Confidence: {confidence:.2f}%")
+    st.success(f"{confidence:.2f}% Confidence")
 
 # Footer
 st.markdown("---")
-st.caption("Developed using Python, Scikit-Learn and Streamlit")
+
+st.caption(
+    "Developed by Vivek Kumar | Python • Machine Learning • Streamlit"
+)
