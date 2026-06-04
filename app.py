@@ -13,6 +13,10 @@ st.set_page_config(
 model = pickle.load(open("fake_news_model.pkl", "rb"))
 vectorizer = pickle.load(open("vectorizer.pkl", "rb"))
 
+# Prediction History
+if "history" not in st.session_state:
+    st.session_state.history = []
+
 # Sidebar
 st.sidebar.title("📊 Project Information")
 
@@ -26,6 +30,13 @@ Dataset Size: 44,898 Articles
 Accuracy: 98.63%
 """)
 
+st.sidebar.subheader("📜 Prediction History")
+
+for item in st.session_state.history[-5:]:
+    st.sidebar.write(
+        f"{item['Category']} → {item['Result']}"
+    )
+
 # Text Cleaning Function
 def clean_text(text):
     text = str(text)
@@ -36,6 +47,25 @@ def clean_text(text):
     text = re.sub(r'[^a-zA-Z\s]', '', text)
 
     return text
+
+# News Category Detection
+def detect_category(text):
+    text = text.lower()
+
+    categories = {
+        "Politics": ["government", "minister", "election", "parliament", "president", "policy"],
+        "Sports": ["cricket", "football", "match", "player", "tournament", "olympics"],
+        "Technology": ["ai", "artificial intelligence", "software", "technology", "computer", "google"],
+        "Business": ["market", "stock", "economy", "bank", "investment", "finance"],
+        "Entertainment": ["movie", "actor", "actress", "film", "music", "celebrity"]
+    }
+
+    for category, keywords in categories.items():
+        for word in keywords:
+            if word in text:
+                return category
+
+    return "General News"
 
 # Main Title
 st.markdown("""
@@ -76,6 +106,8 @@ if st.button("🔍 Analyze News", use_container_width=True):
 
     cleaned_news = clean_text(news)
 
+    category = detect_category(news)
+
     news_vector = vectorizer.transform([cleaned_news])
 
     prediction = model.predict(news_vector)[0]
@@ -84,8 +116,16 @@ if st.button("🔍 Analyze News", use_container_width=True):
 
     confidence = max(probability[0]) * 100
 
+    # Save History
+    st.session_state.history.append({
+        "Category": category,
+        "Result": "Fake" if prediction == 0 else "Real"
+    })
+
     # Prediction Result
     st.markdown("## 📢 Prediction Result")
+
+    st.info(f"📰 Category: {category}")
 
     if prediction == 0:
 
