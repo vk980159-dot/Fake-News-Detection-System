@@ -13,6 +13,8 @@ st.set_page_config(
 model = pickle.load(open("fake_news_model.pkl", "rb"))
 vectorizer = pickle.load(open("vectorizer.pkl", "rb"))
 
+
+
 # Prediction History
 if "history" not in st.session_state:
     st.session_state.history = []
