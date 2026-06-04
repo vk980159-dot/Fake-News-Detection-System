@@ -32,6 +32,11 @@ Dataset Size: 44,898 Articles
 Accuracy: 98.63%
 """)
 
+st.sidebar.metric(
+    "📊 Total Predictions",
+    len(st.session_state.history)
+)
+
 st.sidebar.subheader("📜 Prediction History")
 
 for item in st.session_state.history[-5:]:
@@ -39,6 +44,11 @@ for item in st.session_state.history[-5:]:
         f"{item['Category']} → {item['Result']}"
     )
 
+if st.sidebar.button("🗑 Clear History"):
+    st.session_state.history = []
+    st.rerun()
+
+    
 # Text Cleaning Function
 def clean_text(text):
     text = str(text)
