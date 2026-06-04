@@ -2,7 +2,8 @@ import streamlit as st
 import pickle
 import re
 import pandas as pd
-
+from reportlab.pdfgen import canvas
+import io
 
 # Page Configuration
 st.set_page_config(
@@ -179,6 +180,27 @@ if st.button("🔍 Analyze News", use_container_width=True):
     st.progress(confidence / 100)
 
     st.success(f"{confidence:.2f}% Confidence")
+
+# PDF Report Download
+pdf_buffer = io.BytesIO()
+
+p = canvas.Canvas(pdf_buffer)
+
+p.drawString(100, 800, "Fake News Detection Report")
+p.drawString(100, 770, f"Category: {category}")
+p.drawString(100, 740, f"Prediction: {'Fake' if prediction == 0 else 'Real'}")
+p.drawString(100, 710, f"Confidence: {confidence:.2f}%")
+
+p.save()
+
+pdf_buffer.seek(0)
+
+st.download_button(
+    label="📄 Download Report",
+    data=pdf_buffer,
+    file_name="fake_news_report.pdf",
+    mime="application/pdf"
+)
 
 # Footer
 st.markdown("---")
