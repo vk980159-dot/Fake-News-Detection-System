@@ -1,6 +1,8 @@
 import streamlit as st
 import pickle
 import re
+import pandas as pd
+
 
 # Page Configuration
 st.set_page_config(
@@ -184,3 +186,27 @@ st.markdown("---")
 st.caption(
     "Developed by Vivek Kumar | Python • Machine Learning • Streamlit"
 )
+
+# Dashboard Analytics
+st.markdown("## 📊 Analytics Dashboard")
+
+if len(st.session_state.history) > 0:
+
+    df = pd.DataFrame(st.session_state.history)
+
+    st.subheader("📈 Prediction Statistics")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.write("### Fake vs Real News")
+        result_counts = df["Result"].value_counts()
+        st.bar_chart(result_counts)
+
+    with col2:
+        st.write("### News Categories")
+        category_counts = df["Category"].value_counts()
+        st.bar_chart(category_counts)
+
+else:
+    st.info("Analyze some news articles to view dashboard analytics.")
