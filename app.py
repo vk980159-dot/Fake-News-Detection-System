@@ -25,6 +25,10 @@ if "history" not in st.session_state:
 if "fetched_news" not in st.session_state:
     st.session_state.fetched_news = ""
 
+if "last_prediction" not in st.session_state:
+    st.session_state.last_prediction = None
+
+
 # ─── Sidebar ──────────────────────────────────────────────────────────────────
 st.sidebar.title("📊 Project Information")
 
@@ -152,6 +156,13 @@ if st.button("🔍 Analyze News", use_container_width=True):
         "Result": "Fake" if prediction == 0 else "Real"
     })
 
+    # Save last prediction to session state for PDF download
+    st.session_state.last_prediction = {
+        "category": category,
+        "prediction": prediction,
+        "confidence": confidence,
+    }
+
     # ── Result ────────────────────────────────────────────────────────────────
     st.markdown("## 📢 Prediction Result")
     st.info(f"📰 Category: {category}")
@@ -196,14 +207,35 @@ if st.button("🔍 Analyze News", use_container_width=True):
             "⚠️ Low Confidence Prediction. Please verify from trusted news sources."
         )
 
-    # ── PDF Report Download ───────────────────────────────────────────────────
+# ─── News Statistics (always visible when text is present) ────────────────────
+st.subheader("📑 News Statistics")
+
+word_count = len(news.split())
+sentence_count = len([s for s in news.split(".") if s.strip()])
+reading_time = max(1, round(word_count / 200))
+
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    st.metric("📝 Words", word_count)
+
+with col2:
+    st.metric("📄 Sentences", sentence_count)
+
+with col3:
+    st.metric("⏱ Reading Time", f"{reading_time} min")
+
+# ─── PDF Report Download (shown after a prediction has been made) ─────────────
+if st.session_state.last_prediction:
+    lp = st.session_state.last_prediction
+
     pdf_buffer = io.BytesIO()
     p = canvas.Canvas(pdf_buffer)
 
     p.drawString(100, 800, "Fake News Detection Report")
-    p.drawString(100, 770, f"Category: {category}")
-    p.drawString(100, 740, f"Prediction: {'Fake News' if prediction == 0 else 'Real News'}")
-    p.drawString(100, 710, f"Confidence: {confidence:.2f}%")
+    p.drawString(100, 770, f"Category: {lp['category']}")
+    p.drawString(100, 740, f"Prediction: {'Fake News' if lp['prediction'] == 0 else 'Real News'}")
+    p.drawString(100, 710, f"Confidence: {lp['confidence']:.2f}%")
     p.save()
 
     pdf_buffer.seek(0)
