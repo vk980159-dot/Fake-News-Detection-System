@@ -69,11 +69,11 @@ def detect_category(text):
     text = text.lower()
 
     categories = {
-        "Politics": ["government", "minister", "election", "parliament", "president", "policy"],
-        "Sports": ["cricket", "football", "match", "player", "tournament", "olympics"],
-        "Technology": ["ai", "artificial intelligence", "software", "technology", "computer", "google"],
-        "Business": ["market", "stock", "economy", "bank", "investment", "finance"],
-        "Entertainment": ["movie", "actor", "actress", "film", "music", "celebrity"]
+        "Politics":      ["government", "minister", "election", "parliament", "president", "policy"],
+        "Sports":        ["cricket", "football", "match", "player", "tournament", "olympics"],
+        "Technology":    ["ai", "artificial intelligence", "software", "technology", "computer", "google"],
+        "Business":      ["market", "stock", "economy", "bank", "investment", "finance"],
+        "Entertainment": ["movie", "actor", "actress", "film", "music", "celebrity"],
     }
 
     for category, keywords in categories.items():
@@ -185,17 +185,17 @@ if st.button("🔍 Analyze News", use_container_width=True):
     st.subheader("📊 Confidence Score")
     st.progress(confidence / 100)
     st.success(f"{confidence:.2f}% Confidence")
- # Confidence Status
-if confidence >= 90:
-    st.success("🟢 High Confidence Prediction")
 
-elif confidence >= 70:
-    st.info("🟡 Medium Confidence Prediction")
+    # ── Confidence Status ─────────────────────────────────────────────────────
+    if confidence >= 90:
+        st.success("🟢 High Confidence Prediction")
+    elif confidence >= 70:
+        st.info("🟡 Medium Confidence Prediction")
+    else:
+        st.warning(
+            "⚠️ Low Confidence Prediction. Please verify from trusted news sources."
+        )
 
-else:
-    st.warning(
-        "⚠️ Low Confidence Prediction. Please verify from trusted news sources."
-    )
     # ── PDF Report Download ───────────────────────────────────────────────────
     pdf_buffer = io.BytesIO()
     p = canvas.Canvas(pdf_buffer)
