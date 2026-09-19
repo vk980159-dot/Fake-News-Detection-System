@@ -205,6 +205,114 @@ def run_contradiction_tests():
     print(">>> Test 6B PASSED: Unconfirmed ranking correctly demoted from SUPPORTING to CONTEXTUAL")
 
     # -----------------------------------------------------------------
+    # Test 6C: First country vs First probe (Live Bug Regression)
+    # Claim: "India was the first country to land a spacecraft on the Moon in 2023."
+    # Evidence: "India on the moon! Chandrayaan-3 becomes 1st probe to land near lunar south pole."
+    # Must NOT be classified as SUPPORTING! Must be CONTEXTUAL due to scope and sub-location mismatch.
+    # -----------------------------------------------------------------
+    print("\n--- Test 6C: Scope Mismatch (first country vs 1st probe) ---")
+    claim_6c = "India was the first country to land a spacecraft on the Moon in 2023."
+    ev_6c = {
+        'source': 'Space.com',
+        'domain': 'space.com',
+        'title': 'India on the moon!',
+        'snippet': 'India on the moon! Chandrayaan-3 becomes 1st probe to land near lunar south pole.'
+    }
+    props_6c = decompose_claim(claim_6c)
+    eval_6c = evaluate_evidence_relevance(claim_6c, props_6c, ev_6c)
+    print(f"Stance: {eval_6c['stance']}")
+    print(f"Reason: {eval_6c.get('reason')}")
+    assert eval_6c['stance'] == 'CONTEXTUAL', f"CRITICAL: Expected CONTEXTUAL, got {eval_6c['stance']}"
+    
+    # Verify end-to-end verdict cannot be VERIFIED
+    ev_res_6c = {
+        "claim": claim_6c,
+        "is_available": True,
+        "status": "Contextual",
+        "supporting_evidence": [],
+        "contradicting_evidence": [],
+        "contextual_evidence": [eval_6c],
+        "all_evaluations": [eval_6c],
+        "supporting_count": 0,
+        "contradicting_count": 0,
+        "contextual_count": 1,
+        "is_partially_supported": False
+    }
+    verdict_6c = fuse_verdict(
+        ml_prediction=0,
+        confidence=78.13,
+        evidence_data=ev_res_6c,
+        source_data={"reliability_tier": "Low", "overall_source_score": 50},
+        sensational_data={"is_sensational": False}
+    )
+    print(f"Final Verdict: {verdict_6c['verdict']}")
+    assert verdict_6c['verdict'] != 'VERIFIED', "CRITICAL: Verdict must NEVER be VERIFIED for scope mismatch!"
+    assert verdict_6c['verdict'] == 'UNCERTAIN', f"Expected UNCERTAIN, got {verdict_6c['verdict']}"
+    print(">>> Test 6C PASSED: Scope mismatch correctly classified as CONTEXTUAL and verdict is UNCERTAIN")
+
+    # -----------------------------------------------------------------
+    # Test 6D: Global vs Location-specific achievement
+    # Claim: "India achieved the first spacecraft landing on the Moon in 2023."
+    # Evidence: "Chandrayaan-3 achieved the first landing near the lunar south pole."
+    # Must NOT be classified as SUPPORTING! Must be CONTEXTUAL due to sub-location restriction.
+    # -----------------------------------------------------------------
+    print("\n--- Test 6D: Global Achievement vs Sub-location Achievement ---")
+    claim_6d = "India achieved the first spacecraft landing on the Moon in 2023."
+    ev_6d = {
+        'source': 'Nature',
+        'domain': 'nature.com',
+        'title': 'Lunar South Pole Landing',
+        'snippet': 'Chandrayaan-3 achieved the first landing near the lunar south pole.'
+    }
+    props_6d = decompose_claim(claim_6d)
+    eval_6d = evaluate_evidence_relevance(claim_6d, props_6d, ev_6d)
+    print(f"Stance: {eval_6d['stance']}")
+    print(f"Reason: {eval_6d.get('reason')}")
+    assert eval_6d['stance'] == 'CONTEXTUAL', f"CRITICAL: Expected CONTEXTUAL, got {eval_6d['stance']}"
+    print(">>> Test 6D PASSED: Location-restricted first correctly classified as CONTEXTUAL for global landing claim")
+
+    # -----------------------------------------------------------------
+    # Test 6E: Country Ranking vs Mission Ranking
+    # Claim: "India was the 1st country to land on the Moon."
+    # Evidence: "Chandrayaan-3 was India's 3rd lunar exploration mission."
+    # Must NOT be classified as SUPPORTING or CONTRADICTING! Must be CONTEXTUAL.
+    # -----------------------------------------------------------------
+    print("\n--- Test 6E: Country Ranking vs Mission Ranking ---")
+    claim_6e = "India was the 1st country to land on the Moon."
+    ev_6e = {
+        'source': 'ISRO',
+        'domain': 'isro.gov.in',
+        'title': 'Mission Profile',
+        'snippet': "Chandrayaan-3 was India's 3rd lunar exploration mission."
+    }
+    props_6e = decompose_claim(claim_6e)
+    eval_6e = evaluate_evidence_relevance(claim_6e, props_6e, ev_6e)
+    print(f"Stance: {eval_6e['stance']}")
+    print(f"Reason: {eval_6e.get('reason')}")
+    assert eval_6e['stance'] == 'CONTEXTUAL', f"CRITICAL: Expected CONTEXTUAL, got {eval_6e['stance']}"
+    print(">>> Test 6E PASSED: Mission sequence vs country ranking correctly classified as CONTEXTUAL")
+
+    # -----------------------------------------------------------------
+    # Test 6F: Exact Matching Country-Level Ranking Evidence -> SUPPORTING
+    # Claim: "India became the fourth country to successfully land a spacecraft on the Moon."
+    # Evidence: "India has become the 4th country to successfully land on the Moon after US, Russia and China."
+    # -----------------------------------------------------------------
+    print("\n--- Test 6F: Exact Matching Country-Level Ranking ---")
+    claim_6f = "India became the fourth country to successfully land a spacecraft on the Moon."
+    ev_6f = {
+        'source': 'BBC News',
+        'domain': 'bbc.com',
+        'title': 'India joins elite lunar club',
+        'snippet': 'India has become the 4th country to successfully land on the Moon after US, Russia and China.'
+    }
+    props_6f = decompose_claim(claim_6f)
+    eval_6f = evaluate_evidence_relevance(claim_6f, props_6f, ev_6f)
+    print(f"Stance: {eval_6f['stance']}")
+    print(f"Reason: {eval_6f.get('reason')}")
+    assert eval_6f['stance'] == 'SUPPORTING', f"Expected SUPPORTING, got {eval_6f['stance']}"
+    print(">>> Test 6F PASSED: Exact matching country ranking correctly classified as SUPPORTING")
+
+    # -----------------------------------------------------------------
     # Test 7: Genuine Chandrayaan-3 Landing Claim -> SUPPORTING & VERIFIED
     # -----------------------------------------------------------------
     print("\n--- Test 7: Genuine Chandrayaan-3 Corroboration ---")
@@ -246,7 +354,7 @@ def run_contradiction_tests():
     print(">>> Test 7 PASSED: Genuine factual claim corroborated as SUPPORTING and VERIFIED")
 
     print("\n==================================================================")
-    print("ALL 7 ATTRIBUTE CONTRADICTION TESTS PASSED PERFECTLY!")
+    print("ALL ATTRIBUTE CONTRADICTION AND SCOPE ENTAILMENT TESTS PASSED!")
     print("==================================================================")
 
 if __name__ == '__main__':

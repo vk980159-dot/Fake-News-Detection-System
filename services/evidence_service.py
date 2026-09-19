@@ -229,6 +229,187 @@ MODIFIER_CONFLICTS = {
     "all": {"some", "few", "partial", "partially"}
 }
 
+RANKING_SCOPE_MAP = {
+    # Country / nation / state
+    "country": "country", "countries": "country",
+    "nation": "country", "nations": "country",
+    "state": "country", "states": "country",
+    "power": "country", "powers": "country",
+    "government": "country", "governments": "country",
+
+    # Probe / spacecraft / vehicle / lander / rover
+    "probe": "probe", "probes": "probe",
+    "spacecraft": "probe", "spacecrafts": "probe",
+    "craft": "probe", "crafts": "probe",
+    "lander": "probe", "landers": "probe",
+    "rover": "probe", "rovers": "probe",
+    "satellite": "probe", "satellites": "probe",
+    "module": "probe", "modules": "probe",
+    "vehicle": "probe", "vehicles": "probe",
+    "vessel": "probe", "vessels": "probe",
+    "orbiter": "probe", "capsule": "probe",
+
+    # Mission / program / project
+    "mission": "mission", "missions": "mission",
+    "expedition": "mission", "expeditions": "mission",
+    "program": "mission", "programs": "mission",
+    "programme": "mission", "programmes": "mission",
+    "flight": "mission", "flights": "mission",
+    "attempt": "mission", "attempts": "mission",
+    "project": "mission", "projects": "mission",
+
+    # Person / human / astronaut
+    "person": "person", "persons": "person",
+    "people": "person", "human": "person", "humans": "person",
+    "man": "person", "men": "person",
+    "woman": "person", "women": "person",
+    "astronaut": "person", "astronauts": "person",
+    "cosmonaut": "person", "cosmonauts": "person",
+    "taikonaut": "person", "taikonauts": "person",
+    "citizen": "person", "citizens": "person",
+
+    # Landing / action / event
+    "landing": "landing", "landings": "landing",
+    "touchdown": "landing", "touchdowns": "landing"
+}
+
+SUB_LOCATION_PATTERNS = {
+    "south_pole": [
+        r'\bsouth\s+pole\b',
+        r'\blunar\s+south\s+pole\b',
+        r'\bsouth\s+polar\b',
+        r'\bpolar\s+region\b',
+        r'\bsouthern\s+pole\b',
+        r'\bpolar\b'
+    ],
+    "north_pole": [
+        r'\bnorth\s+pole\b',
+        r'\blunar\s+north\s+pole\b',
+        r'\bnorth\s+polar\b',
+        r'\bnorthern\s+pole\b'
+    ],
+    "far_side": [
+        r'\bfar\s+side\b',
+        r'\bdark\s+side\b',
+        r'\bfarside\b'
+    ],
+    "near_side": [
+        r'\bnear\s+side\b',
+        r'\bnearside\b'
+    ],
+    "equator": [
+        r'\bequator\b',
+        r'\bequatorial\b'
+    ],
+    "orbit": [
+        r'\blunar\s+orbit\b',
+        r'\bin\s+orbit\b',
+        r'\borbital\b'
+    ]
+}
+
+COUNTRY_NAMES = {
+    "india", "indian", "us", "usa", "america", "american", "russia", "russian",
+    "ussr", "soviet", "china", "chinese", "japan", "japanese", "israel", "israeli",
+    "france", "french", "germany", "german", "uk", "britain", "british"
+}
+
+PROBE_NAMES = {
+    "chandrayaan", "chandrayaan-3", "chandrayaan-2", "chandrayaan-1",
+    "vikram", "pragyan", "luna", "luna-25", "apollo", "artemis", "perseverance",
+    "curiosity", "chang'e", "change"
+}
+
+def extract_sub_locations(text: str) -> Set[str]:
+    """
+    Extracts specific sub-locations or regional identifiers (e.g. south pole, polar region, far side).
+    """
+    sub_locs = set()
+    text_lower = text.lower()
+    for sloc, pats in SUB_LOCATION_PATTERNS.items():
+        for pat in pats:
+            if re.search(pat, text_lower):
+                sub_locs.add(sloc)
+                break
+    return sub_locs
+
+def classify_entity_type(term: str) -> str:
+    """Classifies entity into broad category: country, probe, mission, person, general."""
+    t = term.lower().strip()
+    if t in COUNTRY_NAMES or any(c in t for c in COUNTRY_NAMES):
+        return "country"
+    if t in ("isro", "nasa", "esa", "jaxa", "roscosmos", "cnsa"):
+        return "agency"
+    if t in PROBE_NAMES or any(p in t for p in PROBE_NAMES):
+        return "probe"
+    if t in ("mission", "project", "program", "programme"):
+        return "mission"
+    if t in ("astronaut", "cosmonaut", "person", "human", "citizen"):
+        return "person"
+    return "general"
+
+def extract_ranking_details(text: str) -> List[Dict[str, Any]]:
+    """
+    Extracts structured ranking information including rank value, scope (country/probe/mission/person/landing),
+    target noun, phrase, and associated sub-location.
+    """
+    text_lower = text.lower()
+    details = []
+    ord_pattern = r'\b(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|1st|2nd|3rd|4th|5th|6th|7th|8th|9th|10th)\b'
+    for m in re.finditer(ord_pattern, text_lower):
+        ord_word = m.group(1)
+        val = RANKING_MAP.get(ord_word)
+        if not val:
+            continue
+        start_idx = m.start()
+        after_text = text_lower[start_idx:start_idx + 80]
+
+        scope = "general"
+        target_noun = ""
+        sub_loc = None
+
+        tokens = re.findall(r'[a-z\-]+', after_text)
+        for w in tokens[1:6]:
+            if w in RANKING_SCOPE_MAP:
+                scope = RANKING_SCOPE_MAP[w]
+                target_noun = w
+                break
+
+        if scope == "general":
+            to_m = re.match(r'(?:first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|1st|2nd|3rd|4th|5th|6th|7th|8th|9th|10th)\s+to\s+([a-z]+)', after_text)
+            if to_m:
+                act = to_m.group(1)
+                if any(c in text_lower for c in COUNTRY_NAMES):
+                    scope = "country"
+                    target_noun = f"country to {act}"
+                elif any(p in text_lower for p in PROBE_NAMES):
+                    scope = "probe"
+                    target_noun = f"probe to {act}"
+                else:
+                    scope = "action"
+                    target_noun = f"to {act}"
+
+        for sloc, pats in SUB_LOCATION_PATTERNS.items():
+            for pat in pats:
+                if re.search(pat, after_text):
+                    sub_loc = sloc
+                    break
+            if sub_loc:
+                break
+
+        phrase_m = re.match(r'^(?:[a-z0-9\-]+\s+){1,6}', after_text)
+        phrase = phrase_m.group(0).strip() if phrase_m else ord_word
+
+        details.append({
+            "val": val,
+            "word": ord_word,
+            "scope": scope,
+            "target_noun": target_noun,
+            "sub_location": sub_loc,
+            "phrase": phrase
+        })
+    return details
+
 def extract_rankings(text: str) -> Dict[int, str]:
     """
     Extracts ordinal rankings and ranking phrases from text.
@@ -239,7 +420,7 @@ def extract_rankings(text: str) -> Dict[int, str]:
     rankings = {}
     text_lower = text.lower()
 
-    phrase_pattern = r'\b(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|1st|2nd|3rd|4th|5th|6th|7th|8th|9th|10th)\s+(country|nation|state|entity|spacecraft|rover|lander|mission|to\s+\w+)\b'
+    phrase_pattern = r'\b(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|1st|2nd|3rd|4th|5th|6th|7th|8th|9th|10th)\s+(country|nation|state|entity|probe|spacecraft|rover|lander|satellite|module|vehicle|mission|landing|touchdown|to\s+\w+)\b'
     for match in re.finditer(phrase_pattern, text_lower):
         ord_word = match.group(1)
         full_phrase = match.group(0)
@@ -457,6 +638,8 @@ def decompose_claim(claim_text: str, title: Optional[str] = None) -> List[Dict[s
             entities = {norm_words[i] for i, w in enumerate(words) if len(norm_words[i]) > 2 and w not in STOPWORDS and not w.isdigit()}
             years = set(re.findall(r'\b(19\d\d|20\d\d)\b', c_clean)) or overall_years
             rankings = extract_rankings(c_clean)
+            ranking_details = extract_ranking_details(c_clean)
+            sub_locations = extract_sub_locations(c_clean)
             dates = extract_dates(c_clean)
             months = extract_months(c_clean) or overall_months
             parsed_quantities = extract_quantities(c_clean, years)
@@ -470,16 +653,20 @@ def decompose_claim(claim_text: str, title: Optional[str] = None) -> List[Dict[s
                     break
             if not subject and entities:
                 subject = list(entities)[0]
+            subject_type = classify_entity_type(subject) if subject else "general"
 
             propositions.append({
                 "text": c_clean,
                 "subject": subject,
+                "subject_type": subject_type,
                 "actions": actions,
                 "objects": objects,
                 "locations": locations,
+                "sub_locations": sub_locations,
                 "quantities": quantities,
                 "parsed_quantities": parsed_quantities,
                 "rankings": rankings,
+                "ranking_details": ranking_details,
                 "years": years,
                 "dates": dates,
                 "months": months,
@@ -512,6 +699,8 @@ def decompose_claim(claim_text: str, title: Optional[str] = None) -> List[Dict[s
         entities = {norm_words[i] for i, w in enumerate(words) if len(norm_words[i]) > 2 and w not in STOPWORDS and not w.isdigit()}
         years = set(re.findall(r'\b(19\d\d|20\d\d)\b', raw_text))
         rankings = extract_rankings(raw_text)
+        ranking_details = extract_ranking_details(raw_text)
+        sub_locations = extract_sub_locations(raw_text)
         dates = extract_dates(raw_text)
         months = extract_months(raw_text)
         parsed_quantities = extract_quantities(raw_text, years)
@@ -524,16 +713,20 @@ def decompose_claim(claim_text: str, title: Optional[str] = None) -> List[Dict[s
                 break
         if not subject and entities:
             subject = list(entities)[0]
+        subject_type = classify_entity_type(subject) if subject else "general"
 
         propositions.append({
             "text": raw_text,
             "subject": subject,
+            "subject_type": subject_type,
             "actions": actions,
             "objects": objects,
             "locations": locations,
+            "sub_locations": sub_locations,
             "quantities": quantities,
             "parsed_quantities": parsed_quantities,
             "rankings": rankings,
+            "ranking_details": ranking_details,
             "years": years,
             "dates": dates,
             "months": months,
@@ -737,7 +930,13 @@ def evaluate_evidence_relevance(
     ev_quantities = set(re.findall(r'\b\d{1,3}(?:,\d{3})+\b|\b\d+\b', combined_ev))
     ev_parsed_quantities = extract_quantities(combined_ev, ev_years)
     ev_rankings = extract_rankings(combined_ev)
+    ev_sub_locations = extract_sub_locations(combined_ev)
+    ev_ranking_details = extract_ranking_details(combined_ev)
     ev_modifiers = extract_modifiers(combined_ev)
+
+    # Landing on celestial bodies (moon, mars) inherently involves a spacecraft
+    if "land" in ev_actions and ("moon" in ev_locations or "mars" in ev_locations):
+        ev_objects.add("spacecraft")
 
     # 1. Direct Refutation / Debunking Cue Check
     has_refutation = any(cue in combined_ev for cue in CONTRADICTION_CUES)
@@ -779,6 +978,12 @@ def evaluate_evidence_relevance(
             if not prop["locations"].intersection(ev_locations):
                 location_conflict = True
 
+        # Sub-location conflict check: e.g. north pole vs south pole
+        prop_sublocs = prop.get("sub_locations", set())
+        if prop_sublocs and ev_sub_locations:
+            if not prop_sublocs.intersection(ev_sub_locations):
+                location_conflict = True
+
         # Month check: different calendar months indicate different time periods
         month_conflict = bool(prop.get("months") and ev_months and not prop["months"].intersection(ev_months))
 
@@ -794,21 +999,60 @@ def evaluate_evidence_relevance(
         if is_same_event:
             # A1: Ranking Contradiction (e.g. first vs fourth / 4th)
             prop_ranks = prop.get("rankings", {})
+            prop_rank_details = prop.get("ranking_details", [])
             if prop_ranks and ev_rankings:
+                # 1. Compare structured ranking details by scope
+                for c_rank in prop_rank_details:
+                    c_val = c_rank["val"]
+                    c_scope = c_rank["scope"]
+                    for e_rank in ev_ranking_details:
+                        e_val = e_rank["val"]
+                        e_scope = e_rank["scope"]
+
+                        scopes_comparable = False
+                        if c_scope == e_scope and c_scope != "general":
+                            scopes_comparable = True
+                        elif c_scope in ("country", "general") and e_scope == "country":
+                            scopes_comparable = True
+                        elif c_scope == "country" and e_scope in ("general", "action") and (prop.get("subject_type") == "country" or any(cn in ev_words for cn in COUNTRY_NAMES)):
+                            scopes_comparable = True
+
+                        if scopes_comparable and c_val != e_val:
+                            claim_desc = c_rank["phrase"]
+                            ev_desc = e_rank["phrase"]
+                            return {
+                                "stance": "CONTRADICTING",
+                                "semantic_relevance": 0.96,
+                                "matched_proposition": prop_label,
+                                "conflict_type": "Ranking contradiction",
+                                "claim_attribute": claim_desc,
+                                "evidence_attribute": ev_desc,
+                                "reason": f"Evidence directly contradicts claim ranking: claim asserts '{claim_desc}' (rank {c_val}) but reliable evidence confirms '{ev_desc}' (rank {e_val})."
+                            }
+
+                # 2. Fallback check for ranking contradiction
                 claim_rank_val = list(prop_ranks.keys())[0]
                 ev_rank_val = list(ev_rankings.keys())[0]
                 if claim_rank_val != ev_rank_val:
-                    claim_desc = prop_ranks[claim_rank_val]
-                    ev_desc = ev_rankings[ev_rank_val]
-                    return {
-                        "stance": "CONTRADICTING",
-                        "semantic_relevance": 0.96,
-                        "matched_proposition": prop_label,
-                        "conflict_type": "Ranking contradiction",
-                        "claim_attribute": claim_desc,
-                        "evidence_attribute": ev_desc,
-                        "reason": f"Evidence directly contradicts claim ranking: claim asserts '{claim_desc}' (rank {claim_rank_val}) but reliable evidence confirms '{ev_desc}' (rank {ev_rank_val})."
-                    }
+                    c_phrase = prop_ranks[claim_rank_val].lower()
+                    e_phrase = ev_rankings[ev_rank_val].lower()
+                    c_is_probe_or_mission = any(w in c_phrase for w in ("probe", "spacecraft", "mission", "lander", "rover"))
+                    e_is_probe_or_mission = any(w in e_phrase for w in ("probe", "spacecraft", "mission", "lander", "rover"))
+                    c_is_country = any(w in c_phrase for w in ("country", "nation", "state")) or prop.get("subject_type") == "country"
+                    e_is_country = any(w in e_phrase for w in ("country", "nation", "state"))
+
+                    if (c_is_country and e_is_country) or (c_is_probe_or_mission == e_is_probe_or_mission and not (c_is_country ^ e_is_country)):
+                        claim_desc = prop_ranks[claim_rank_val]
+                        ev_desc = ev_rankings[ev_rank_val]
+                        return {
+                            "stance": "CONTRADICTING",
+                            "semantic_relevance": 0.96,
+                            "matched_proposition": prop_label,
+                            "conflict_type": "Ranking contradiction",
+                            "claim_attribute": claim_desc,
+                            "evidence_attribute": ev_desc,
+                            "reason": f"Evidence directly contradicts claim ranking: claim asserts '{claim_desc}' (rank {claim_rank_val}) but reliable evidence confirms '{ev_desc}' (rank {ev_rank_val})."
+                        }
 
             # A2: Exclusivity / Multi-country Contradiction (e.g. first/only vs multiple / one of several)
             if (prop_ranks.get(1) or "only" in prop.get("modifiers", set())) and ("multiple" in ev_modifiers or re.search(r'\b(one of several|among others|fourth|second|third|multiple countries)\b', combined_ev)):
@@ -896,10 +1140,72 @@ def evaluate_evidence_relevance(
         # ── Step B: Strict Entailment for SUPPORTING ──
         # All required specific attributes MUST be satisfied; otherwise demoted to CONTEXTUAL
         prop_ranks = prop.get("rankings", {})
+        prop_rank_details = prop.get("ranking_details", [])
         ranking_satisfied = True
+        ranking_demotion_reason = ""
+
         if prop_ranks:
             if not bool(set(prop_ranks.keys()).intersection(ev_rankings.keys())):
                 ranking_satisfied = False
+                ranking_demotion_reason = f"Corroborates the general event ({prop.get('subject') or 'topic'}), but lacks factual confirmation of claim ranking ('{list(prop_ranks.values())[0]}')."
+            else:
+                # Ranking number matched. Now verify SCOPE, SUBJECT TYPE, and SUB-LOCATION entailment!
+                has_entailing_rank = False
+                for c_rank in prop_rank_details:
+                    c_val = c_rank["val"]
+                    c_scope = c_rank["scope"]
+                    c_subloc = c_rank.get("sub_location")
+
+                    for e_rank in ev_ranking_details:
+                        if e_rank["val"] == c_val:
+                            e_scope = e_rank["scope"]
+                            e_subloc = e_rank.get("sub_location")
+
+                            # 1. Scope check:
+                            # 'country' cannot be entailed by 'probe', 'mission', or 'landing'
+                            # 'probe' cannot be entailed by 'mission'
+                            scope_matches = False
+                            if c_scope == e_scope:
+                                scope_matches = True
+                            elif c_scope in ("general", ""):
+                                scope_matches = True
+                            elif c_scope == "probe" and e_scope in ("probe", "spacecraft", "lander", "rover"):
+                                scope_matches = True
+                            elif c_scope == "country" and e_scope in ("country", "nation"):
+                                scope_matches = True
+
+                            # 2. Geographic / Sub-location check:
+                            # If claim is a global ranking (c_subloc is None) but evidence is restricted
+                            # to a sub-location (e.g. e_subloc == "south_pole"), the regional first
+                            # does NOT entail the global first!
+                            loc_scope_matches = True
+                            if c_subloc is None and e_subloc is not None:
+                                loc_scope_matches = False
+                            elif c_subloc is not None and e_subloc != c_subloc:
+                                loc_scope_matches = False
+
+                            if scope_matches and loc_scope_matches:
+                                has_entailing_rank = True
+                                break
+                            else:
+                                if not scope_matches:
+                                    ranking_demotion_reason = (
+                                        f"Corroborates the general event ({prop.get('subject') or 'topic'}), "
+                                        f"but claim asserts {c_scope}-level ranking ('{c_rank['phrase']}'), "
+                                        f"whereas evidence refers to {e_scope}-level ranking ('{e_rank['phrase']}')."
+                                    )
+                                elif not loc_scope_matches:
+                                    loc_name = list(prop.get('locations', ['the Moon']))[0].capitalize()
+                                    ranking_demotion_reason = (
+                                        f"Corroborates the general event ({prop.get('subject') or 'topic'}), "
+                                        f"but claim asserts global ranking on {loc_name}, "
+                                        f"whereas evidence specifies a location-restricted achievement ('{e_rank['phrase']}')."
+                                    )
+                    if has_entailing_rank:
+                        break
+
+                if not has_entailing_rank:
+                    ranking_satisfied = False
 
         prop_qtys = prop.get("parsed_quantities", {})
         quantity_satisfied = True
@@ -955,7 +1261,7 @@ def evaluate_evidence_relevance(
                 if location_conflict:
                     best_reason = f"Mentions related entities, but refers to a different location ({list(ev_locations)} vs {list(prop.get('locations', set()))})."
                 elif not ranking_satisfied and prop_ranks:
-                    best_reason = f"Corroborates the general event ({prop.get('subject') or 'topic'}), but lacks factual confirmation of claim ranking ('{list(prop_ranks.values())[0]}')."
+                    best_reason = ranking_demotion_reason or f"Corroborates the general event ({prop.get('subject') or 'topic'}), but lacks factual confirmation of claim ranking ('{list(prop_ranks.values())[0]}')."
                 elif not quantity_satisfied and prop_qtys:
                     best_reason = f"Corroborates the general event, but lacks factual confirmation of stated quantity ('{list(prop_qtys.values())[0]}')."
                 elif not date_satisfied and prop.get("dates"):
