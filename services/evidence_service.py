@@ -453,7 +453,11 @@ PUBLICATION_YEAR_KEYWORDS = {
 }
 
 HISTORICAL_YEAR_KEYWORDS = {
-    "prior", "predecessor", "former", "earlier", "previous", "previously"
+    "prior", "predecessor", "former", "earlier", "previous", "previously", "historic", "history"
+}
+
+REFERENCE_YEAR_KEYWORDS = {
+    "as of", "as at", "by the year", "current as of", "status as of", "status in", "up to", "at the time of", "as per"
 }
 
 def extract_temporal_metadata(text: str) -> Dict[str, Any]:
@@ -462,14 +466,16 @@ def extract_temporal_metadata(text: str) -> Dict[str, Any]:
     - occurrence_years: when the actual asserted event occurred
     - planned_years: when a future or scheduled mission/event is planned
     - publication_years: article publication or filing dates
-    - historical_years: references to prior missions or historical context
-    Also determines event_phase: 'completed', 'planned', 'historical', or 'unspecified'.
+    - reference_years: temporal reference baselines ("as of 2024", "as at 2024", "by 2024")
+    - historical_years: references to prior missions or historical context (Apollo 1969, Surveyor 1966)
+    Also determines event_phase: 'completed', 'planned', 'historical', 'reference', or 'unspecified'.
     """
     text_lower = text.lower()
     details = []
     occurrence_years = set()
     planned_years = set()
     publication_years = set()
+    reference_years = set()
     historical_years = set()
     all_years = set()
 
@@ -484,31 +490,51 @@ def extract_temporal_metadata(text: str) -> Dict[str, Any]:
         window = text_lower[win_start:win_end]
         tokens = set(re.findall(r'[a-z\-]+', window))
 
-        is_planned = bool(tokens.intersection(PLANNED_YEAR_KEYWORDS)) or bool(
-            re.search(r'\b(?:will|would|to be)\s+(?:launch|land|operate|deploy|send|conduct)\b', window)
-        )
-        is_publication = bool(tokens.intersection(PUBLICATION_YEAR_KEYWORDS)) or bool(
-            re.search(rf'\b(?:copyright|\(c\)|\(reuters|\(ap|\(bbc)\b[^\.\,\;]{{0,30}}\b{y_str}\b', window)
-        )
-        is_historical = (y_val < 2020) and (
-            bool(tokens.intersection(HISTORICAL_YEAR_KEYWORDS)) or
-            bool(re.search(rf'\b(?:since|first since|back in)\s+{y_str}\b', window))
+        # 1. Reference Year check (e.g. "As of 2024", "as at 2024", "by 2024", "up to 2024", "current as of 2024")
+        is_reference = bool(
+            re.search(rf'\b(?:as\s+of|as\s+at|current\s+as\s+of|status\s+as\s+of|status\s+in|up\s+to|at\s+the\s+time\s+of|as\s+per)\b[^\.\,\;]{{0,30}}\b{y_str}\b', window)
+        ) or bool(
+            re.search(rf'\bas\s+of\s+(?:january|february|march|april|may|june|july|august|september|october|november|december\s+)?{y_str}\b', window)
+        ) or bool(
+            re.search(rf'\b{y_str}\b[^\.\,\;]{{0,20}}\b(?:status|standing|baseline|record)\b', window)
         )
 
-        if is_planned:
-            y_type = "planned"
+        # 2. Planned / Target Year check
+        is_planned = bool(tokens.intersection(PLANNED_YEAR_KEYWORDS)) or bool(
+            re.search(r'\b(?:will|would|to be|slated to|scheduled to|aims? to|plans? to|target(?:s|ed|ing)?)\s+(?:launch|land|operate|deploy|send|conduct|return|reach)\b', window)
+        )
+
+        # 3. Publication Year check
+        is_publication = bool(tokens.intersection(PUBLICATION_YEAR_KEYWORDS)) or bool(
+            re.search(rf'\b(?:copyright|\(c\)|\(reuters|\(ap|\(bbc|reported\s+on|posted\s+on|published\s+on|updated\s+on)\b[^\.\,\;]{{0,30}}\b{y_str}\b', window)
+        ) or bool(re.search(rf'\b{y_str}\b[^\.\,\;]{{0,20}}\b(?:reuters|associated press|bbc|afp|bloomberg|the hindu|times of india|space daily)\b', window))
+
+        # 4. Historical Year check (Apollo 1969, Surveyor 1966, Luna 1966, etc.)
+        is_historical = (y_val < 2020) and (
+            bool(tokens.intersection(HISTORICAL_YEAR_KEYWORDS)) or
+            bool(re.search(rf'\b(?:since|first since|back in|vanished in|launched in|landed in|survived in|occurred in|during|in)\s+{y_str}\b', window)) or
+            bool(re.search(r'\b(?:apollo|surveyor|luna|viking|pioneer|voyager|mariner|gemini|mercury|sputnik|soviet|cold war|space race|1960s|1970s|1980s|1990s)\b', text_lower)) or
+            y_val < 2010
+        )
+
+        if is_reference:
+            y_type = "reference_year"
+            phase = "reference"
+            reference_years.add(y_str)
+        elif is_planned:
+            y_type = "planned_year"
             phase = "planned"
             planned_years.add(y_str)
         elif is_publication:
-            y_type = "publication"
+            y_type = "publication_year"
             phase = "publication"
             publication_years.add(y_str)
         elif is_historical:
-            y_type = "historical"
+            y_type = "historical_period"
             phase = "historical"
             historical_years.add(y_str)
         else:
-            y_type = "occurrence"
+            y_type = "occurrence_year"
             phase = "completed"
             occurrence_years.add(y_str)
 
@@ -522,6 +548,10 @@ def extract_temporal_metadata(text: str) -> Dict[str, Any]:
 
     if planned_years and not occurrence_years:
         overall_phase = "planned"
+    elif historical_years and not occurrence_years:
+        overall_phase = "historical"
+    elif reference_years and not occurrence_years:
+        overall_phase = "reference"
     elif occurrence_years:
         overall_phase = "completed"
     else:
@@ -533,6 +563,7 @@ def extract_temporal_metadata(text: str) -> Dict[str, Any]:
         "occurrence_years": occurrence_years,
         "planned_years": planned_years,
         "publication_years": publication_years,
+        "reference_years": reference_years,
         "historical_years": historical_years,
         "event_phase": overall_phase
     }
@@ -772,6 +803,7 @@ def decompose_claim(claim_text: str, title: Optional[str] = None) -> List[Dict[s
                 "occurrence_years": temporal_meta["occurrence_years"],
                 "planned_years": temporal_meta["planned_years"],
                 "publication_years": temporal_meta["publication_years"],
+                "reference_years": temporal_meta.get("reference_years", set()),
                 "historical_years": temporal_meta["historical_years"],
                 "event_phase": temporal_meta["event_phase"],
                 "temporal_details": temporal_meta["details"],
@@ -839,6 +871,7 @@ def decompose_claim(claim_text: str, title: Optional[str] = None) -> List[Dict[s
             "occurrence_years": temporal_meta["occurrence_years"],
             "planned_years": temporal_meta["planned_years"],
             "publication_years": temporal_meta["publication_years"],
+            "reference_years": temporal_meta.get("reference_years", set()),
             "historical_years": temporal_meta["historical_years"],
             "event_phase": temporal_meta["event_phase"],
             "temporal_details": temporal_meta["details"],
@@ -1050,8 +1083,10 @@ def evaluate_evidence_relevance(
     ev_occ_years = ev_temporal["occurrence_years"]
     ev_planned_years = ev_temporal["planned_years"]
     ev_pub_years = ev_temporal["publication_years"]
+    ev_ref_years = ev_temporal.get("reference_years", set())
     ev_hist_years = ev_temporal["historical_years"]
     ev_event_phase = ev_temporal["event_phase"]
+    valid_ev_occ_years = ev_occ_years - ev_ref_years - ev_pub_years - ev_planned_years - ev_hist_years
     ev_dates = extract_dates(combined_ev)
     ev_months = extract_months(combined_ev)
     ev_quantities = set(re.findall(r'\b\d{1,3}(?:,\d{3})+\b|\b\d+\b', combined_ev))
@@ -1060,6 +1095,75 @@ def evaluate_evidence_relevance(
     ev_sub_locations = extract_sub_locations(combined_ev)
     ev_ranking_details = extract_ranking_details(combined_ev)
     ev_modifiers = extract_modifiers(combined_ev)
+
+    is_generic_def = bool(
+        re.search(r'\b(?:is a|is an|are a|are|refers to|defined as|is defined as|designation for)\s+(?:spacecraft|vehicle|lander|rover|probe|mission|device|machine|technology)\b', combined_ev)
+        or re.search(r'^[a-z0-9\s\-]+(?:\sor\s[a-z0-9\s\-]+)?\sis\s+(?:a|an|the)\b', combined_ev.strip())
+        or re.search(r'\b(?:a\s+lunar\s+lander\s+is|moon\s+lander\s+is|a\s+spacecraft\s+is)\b', combined_ev)
+    )
+
+    # Extract evidence attributes for debug trace
+    ev_subject = "Not detected"
+    for c_sub, c_aliases in [
+        ("India", ["india", "indian", "isro", "chandrayaan"]),
+        ("United States", ["united states", "usa", "us", "nasa"]),
+        ("Soviet Union", ["soviet union", "ussr", "soviet", "russia", "roscosmos"]),
+        ("China", ["china", "chinese", "cnsa"]),
+        ("Japan", ["japan", "japanese", "jaxa"]),
+        ("Apollo Program", ["apollo lunar module", "apollo program", "apollo"])
+    ]:
+        if any(a in combined_ev for a in c_aliases):
+            ev_subject = c_sub
+            break
+    if ev_subject == "Not detected" and propositions:
+        for p in propositions:
+            p_sub = (p.get("subject") or "").lower()
+            if p_sub and p_sub not in ("none", "unspecified", "general subject"):
+                if any(sw in combined_ev for sw in re.findall(r'[a-zA-Z0-9\-]+', p_sub) if len(sw) > 2):
+                    ev_subject = p_sub.title()
+                    break
+
+    ev_act_str = ", ".join(sorted(ev_actions)) if ev_actions else "Not detected"
+    ev_obj_str = ", ".join(sorted(ev_objects)) if ev_objects else "Not detected"
+
+    if valid_ev_occ_years:
+        ev_yr_str = ", ".join(sorted(valid_ev_occ_years))
+    elif ev_temporal.get("details"):
+        ev_yr_str = ", ".join(sorted(set(d["year"] for d in ev_temporal["details"])))
+    else:
+        ev_yr_str = "Not detected"
+
+    if ev_temporal.get("details"):
+        ev_yr_type = ", ".join(sorted(set(d["type"] for d in ev_temporal["details"])))
+    else:
+        ev_yr_type = "Not detected"
+
+    ev_phase_str = ev_event_phase if ev_event_phase and ev_event_phase != "unspecified" else "Not detected"
+
+    if ev_ranking_details:
+        ev_rank_str = ", ".join(f"'{d['phrase']}' (rank {d['val']})" for d in ev_ranking_details)
+        ev_scope_str = ", ".join(sorted(set(d["scope"] for d in ev_ranking_details)))
+    elif ev_rankings:
+        ev_rank_str = ", ".join(f"rank {k}: {v}" for k, v in ev_rankings.items())
+        ev_scope_str = "general"
+    else:
+        ev_rank_str = "Not detected"
+        ev_scope_str = "Not detected"
+
+    debug_evidence_attrs = {
+        "extracted_subject": ev_subject,
+        "action": ev_act_str,
+        "object": ev_obj_str,
+        "evidence_year": ev_yr_str,
+        "year_type": ev_yr_type,
+        "event_phase": ev_phase_str,
+        "ranking": ev_rank_str,
+        "ranking_scope": ev_scope_str
+    }
+
+    def make_res(res_dict: Dict[str, Any]) -> Dict[str, Any]:
+        res_dict["debug_evidence_attributes"] = debug_evidence_attrs
+        return res_dict
 
     # Landing on celestial bodies (moon, mars) inherently involves a spacecraft
     if "land" in ev_actions and ("moon" in ev_locations or "mars" in ev_locations):
@@ -1073,7 +1177,7 @@ def evaluate_evidence_relevance(
 
     if has_refutation and (any(obj in combined_ev for obj in claim_objects) or len(claim_entities.intersection(ev_words)) >= 2):
         if not (claim_locations and ev_locations and not claim_locations.intersection(ev_locations)):
-            return {
+            return make_res({
                 "stance": "CONTRADICTING",
                 "semantic_relevance": 0.95,
                 "matched_proposition": "Direct Refutation",
@@ -1081,7 +1185,7 @@ def evaluate_evidence_relevance(
                 "claim_attribute": "Claim assertion",
                 "evidence_attribute": "Refutation / Debunking",
                 "reason": "Evidence explicitly contains refutation or debunking language directly refuting the asserted claim or entity."
-            }
+            })
 
     # 2. Check Entailment & Attribute Contradictions against each Proposition
     best_stance = "IRRELEVANT"
@@ -1121,6 +1225,18 @@ def evaluate_evidence_relevance(
         entity_score = 0.20 * overlap_ratio
         total_score = max(0.0, action_score + object_score + location_score + entity_score)
 
+        # Subject match check for proposition
+        prop_subject = (prop.get("subject") or "").lower()
+        subject_matched = False
+        if prop_subject and prop_subject not in ("none", "unspecified", "general subject"):
+            prop_sw = [w for w in re.findall(r'[a-zA-Z0-9\-]+', prop_subject) if len(w) > 2]
+            if any(sw in ev_words or sw in combined_ev for sw in prop_sw):
+                subject_matched = True
+            if "india" in prop_subject and any(w in combined_ev for w in ("india", "indian", "isro", "chandrayaan")):
+                subject_matched = True
+        else:
+            subject_matched = (overlap_ratio >= 0.40)
+
         # ── Step A: Check Direct Attribute Contradictions (When discussing same core event) ──
         is_same_event = (not location_conflict) and (action_match or object_match) and (overlap_ratio >= 0.20 or len(overlap) >= 2)
         if is_same_event:
@@ -1147,7 +1263,7 @@ def evaluate_evidence_relevance(
                         if scopes_comparable and c_val != e_val:
                             claim_desc = c_rank["phrase"]
                             ev_desc = e_rank["phrase"]
-                            return {
+                            return make_res({
                                 "stance": "CONTRADICTING",
                                 "semantic_relevance": 0.96,
                                 "matched_proposition": prop_label,
@@ -1155,7 +1271,7 @@ def evaluate_evidence_relevance(
                                 "claim_attribute": claim_desc,
                                 "evidence_attribute": ev_desc,
                                 "reason": f"Evidence directly contradicts claim ranking: claim asserts '{claim_desc}' (rank {c_val}) but reliable evidence confirms '{ev_desc}' (rank {e_val})."
-                            }
+                            })
 
                 # 2. Fallback check for ranking contradiction
                 claim_rank_val = list(prop_ranks.keys())[0]
@@ -1171,7 +1287,7 @@ def evaluate_evidence_relevance(
                     if (c_is_country and e_is_country) or (c_is_probe_or_mission == e_is_probe_or_mission and not (c_is_country ^ e_is_country)):
                         claim_desc = prop_ranks[claim_rank_val]
                         ev_desc = ev_rankings[ev_rank_val]
-                        return {
+                        return make_res({
                             "stance": "CONTRADICTING",
                             "semantic_relevance": 0.96,
                             "matched_proposition": prop_label,
@@ -1179,13 +1295,13 @@ def evaluate_evidence_relevance(
                             "claim_attribute": claim_desc,
                             "evidence_attribute": ev_desc,
                             "reason": f"Evidence directly contradicts claim ranking: claim asserts '{claim_desc}' (rank {claim_rank_val}) but reliable evidence confirms '{ev_desc}' (rank {ev_rank_val})."
-                        }
+                        })
 
             # A2: Exclusivity / Multi-country Contradiction (e.g. first/only vs multiple / one of several)
             if (prop_ranks.get(1) or "only" in prop.get("modifiers", set())) and ("multiple" in ev_modifiers or re.search(r'\b(one of several|among others|fourth|second|third|multiple countries)\b', combined_ev)):
                 claim_desc = prop_ranks.get(1) or "only / sole"
                 ev_desc = "one of several / multiple"
-                return {
+                return make_res({
                     "stance": "CONTRADICTING",
                     "semantic_relevance": 0.95,
                     "matched_proposition": prop_label,
@@ -1193,7 +1309,7 @@ def evaluate_evidence_relevance(
                     "claim_attribute": claim_desc,
                     "evidence_attribute": ev_desc,
                     "reason": f"Evidence directly contradicts claim exclusivity/ranking: claim asserts '{claim_desc}' but evidence confirms '{ev_desc}'."
-                }
+                })
 
             # A3: Quantity Contradiction (e.g. 10,000 vs 100)
             same_period = True
@@ -1209,7 +1325,7 @@ def evaluate_evidence_relevance(
                     if claim_q_val != ev_q_val:
                         claim_q_desc = prop_qtys[claim_q_val]
                         ev_q_desc = ev_parsed_quantities[ev_q_val]
-                        return {
+                        return make_res({
                             "stance": "CONTRADICTING",
                             "semantic_relevance": 0.95,
                             "matched_proposition": prop_label,
@@ -1217,14 +1333,14 @@ def evaluate_evidence_relevance(
                             "claim_attribute": str(claim_q_desc),
                             "evidence_attribute": str(ev_q_desc),
                             "reason": f"Evidence directly contradicts the stated quantity: claim asserts '{claim_q_desc}' but evidence reports '{ev_q_desc}'."
-                        }
+                        })
 
             # A4: Temporal Date Contradiction (e.g. September 15 vs August 23)
             if prop.get("dates") and ev_dates:
                 if not prop["dates"].intersection(ev_dates):
                     claim_d = list(prop["dates"])[0]
                     ev_d = list(ev_dates)[0]
-                    return {
+                    return make_res({
                         "stance": "CONTRADICTING",
                         "semantic_relevance": 0.95,
                         "matched_proposition": prop_label,
@@ -1232,19 +1348,23 @@ def evaluate_evidence_relevance(
                         "claim_attribute": claim_d,
                         "evidence_attribute": ev_d,
                         "reason": f"Evidence directly contradicts the event date: claim asserts '{claim_d}' but evidence reports '{ev_d}'."
-                    }
+                    })
 
             # A5: Temporal Year Contradiction (Strict Same-Event Occurrence Date Conflict)
             prop_occ_years = prop.get("occurrence_years", set()) or prop.get("years", set())
-            if prop_occ_years and ev_occ_years:
-                conflicting_occ = ev_occ_years - prop_occ_years
-                if not prop_occ_years.intersection(ev_occ_years) and conflicting_occ:
+            if prop_occ_years and valid_ev_occ_years:
+                conflicting_occ = valid_ev_occ_years - prop_occ_years
+                if not prop_occ_years.intersection(valid_ev_occ_years) and conflicting_occ:
                     same_event_action = action_match and object_match and not location_conflict
                     same_phase = (prop.get("event_phase", "completed") == ev_event_phase) or (ev_event_phase != "planned")
-                    if same_event_action and same_phase:
+                    # Strict requirements:
+                    # - Must NOT be a generic definition
+                    # - Must match proposition subject
+                    # - Must have sufficient entity overlap on specific event
+                    if same_event_action and same_phase and subject_matched and not is_generic_def and (overlap_ratio >= 0.25 or len(overlap) >= 2):
                         claim_y = list(prop_occ_years)[0]
                         ev_y = list(conflicting_occ)[0]
-                        return {
+                        return make_res({
                             "stance": "CONTRADICTING",
                             "semantic_relevance": 0.95,
                             "matched_proposition": prop_label,
@@ -1252,14 +1372,14 @@ def evaluate_evidence_relevance(
                             "claim_attribute": claim_y,
                             "evidence_attribute": ev_y,
                             "reason": f"Evidence directly contradicts the event occurrence year: claim asserts '{claim_y}' but reliable evidence confirms '{ev_y}' for the same event."
-                        }
+                        })
 
             # A6: Modifier Contradiction (e.g. permanent vs temporary)
             for mod in prop.get("modifiers", set()):
                 conflicts = MODIFIER_CONFLICTS.get(mod, set())
                 if conflicts.intersection(ev_modifiers) or any(re.search(rf'\b{re.escape(c)}\b', combined_ev) for c in conflicts):
                     matched_conflict = list(conflicts.intersection(ev_modifiers))[0] if conflicts.intersection(ev_modifiers) else list(conflicts)[0]
-                    return {
+                    return make_res({
                         "stance": "CONTRADICTING",
                         "semantic_relevance": 0.95,
                         "matched_proposition": prop_label,
@@ -1267,7 +1387,7 @@ def evaluate_evidence_relevance(
                         "claim_attribute": mod,
                         "evidence_attribute": matched_conflict,
                         "reason": f"Evidence directly contradicts claim modifier: claim asserts '{mod}' but evidence confirms '{matched_conflict}'."
-                    }
+                    })
 
         # ── Step B: Strict Entailment for SUPPORTING ──
         # All required specific attributes MUST be satisfied; otherwise demoted to CONTEXTUAL
@@ -1294,8 +1414,6 @@ def evaluate_evidence_relevance(
                             e_subloc = e_rank.get("sub_location")
 
                             # 1. Scope check:
-                            # 'country' cannot be entailed by 'probe', 'mission', or 'landing'
-                            # 'probe' cannot be entailed by 'mission'
                             scope_matches = False
                             if c_scope == e_scope:
                                 scope_matches = True
@@ -1307,9 +1425,6 @@ def evaluate_evidence_relevance(
                                 scope_matches = True
 
                             # 2. Geographic / Sub-location check:
-                            # If claim is a global ranking (c_subloc is None) but evidence is restricted
-                            # to a sub-location (e.g. e_subloc == "south_pole"), the regional first
-                            # does NOT entail the global first!
                             loc_scope_matches = True
                             if c_subloc is None and e_subloc is not None:
                                 loc_scope_matches = False
@@ -1359,9 +1474,9 @@ def evaluate_evidence_relevance(
         # for the same event action (never for planned years, publication years, or historical references)
         year_conflict = False
         prop_occ_years = prop.get("occurrence_years", set()) or prop.get("years", set())
-        if prop_occ_years and ev_occ_years:
-            if not prop_occ_years.intersection(ev_occ_years):
-                if action_match and object_match and not location_conflict and ev_event_phase != "planned":
+        if prop_occ_years and valid_ev_occ_years:
+            if not prop_occ_years.intersection(valid_ev_occ_years):
+                if action_match and object_match and not location_conflict and ev_event_phase != "planned" and subject_matched and not is_generic_def:
                     year_conflict = True
 
         non_year_prop_qty = prop.get("quantities", set()) - prop.get("years", set())
@@ -1382,7 +1497,7 @@ def evaluate_evidence_relevance(
         else:
             entails = (overlap_ratio >= 0.50 or len(overlap) >= 3)
 
-        has_matching_year = bool(prop_occ_years and prop_occ_years.intersection(ev_occ_years or ev_years))
+        has_matching_year = bool(prop_occ_years and prop_occ_years.intersection(valid_ev_occ_years or ev_years))
         detail_score = 0.10 if (not year_conflict and has_matching_year) else (0.05 if not year_conflict else 0.0)
         total_score = max(0.0, total_score + detail_score)
 
@@ -1395,10 +1510,14 @@ def evaluate_evidence_relevance(
             best_score = total_score
             if total_score >= 0.15:
                 best_stance = "CONTEXTUAL"
-                if location_conflict:
+                if is_generic_def:
+                    best_reason = f"Contextual reference defining {prop.get('object', 'spacecraft') or 'topic'}, rather than reporting event occurrence."
+                elif location_conflict:
                     best_reason = f"Mentions related entities, but refers to a different location ({list(ev_locations)} vs {list(prop.get('locations', set()))})."
-                elif year_conflict and prop_occ_years and ev_occ_years:
-                    best_reason = f"Corroborates the general topic, but refers to a conflicting event occurrence year ({list(ev_occ_years)[0]} vs {list(prop_occ_years)[0]})."
+                elif year_conflict and prop_occ_years and valid_ev_occ_years:
+                    best_reason = f"Corroborates the general topic, but refers to a conflicting event occurrence year ({list(valid_ev_occ_years)[0]} vs {list(prop_occ_years)[0]})."
+                elif ev_ref_years:
+                    best_reason = f"Contains reference timestamp ({list(ev_ref_years)[0]}), but does not confirm or contradict the claimed occurrence year."
                 elif not ranking_satisfied and prop_ranks:
                     best_reason = ranking_demotion_reason or f"Corroborates the general event ({prop.get('subject') or 'topic'}), but lacks factual confirmation of claim ranking ('{list(prop_ranks.values())[0]}')."
                 elif not quantity_satisfied and prop_qtys:
@@ -1413,7 +1532,7 @@ def evaluate_evidence_relevance(
                 best_stance = "IRRELEVANT"
                 best_reason = "Evidence is not relevant to the factual claim."
 
-    return {
+    return make_res({
         "stance": best_stance,
         "semantic_relevance": round(best_score, 2),
         "matched_proposition": best_prop or "None",
@@ -1421,7 +1540,7 @@ def evaluate_evidence_relevance(
         "claim_attribute": best_claim_attr,
         "evidence_attribute": best_ev_attr,
         "reason": best_reason
-    }
+    })
 
 def classify_evidence_stance(claim_text: str, evidence_item: Dict[str, Any], title: Optional[str] = None) -> str:
     """
@@ -1438,20 +1557,51 @@ def classify_evidence_stance(claim_text: str, evidence_item: Dict[str, Any], tit
 def build_debug_claim_attributes(propositions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     debug_claim_attrs = []
     for idx, p in enumerate(propositions, 1):
-        rank_strs = [f"'{d['phrase']}' (Value: {d['val']}, Scope: {d['scope']})" for d in p.get("ranking_details", [])]
+        rank_details = p.get("ranking_details", [])
+        rank_strs = [f"'{d['phrase']}' (Value: {d['val']}, Scope: {d['scope']})" for d in rank_details]
         sublocs = list(p.get("sub_locations", set()))
+        actions_list = sorted(list(p.get("actions", set())))
+        objects_list = sorted(list(p.get("objects", set())))
+        locations_list = sorted(list(p.get("locations", set())))
+        years_list = sorted(list(p.get("occurrence_years", set()) or p.get("years", set())))
+
+        sub_val = p.get("subject") or "Not detected"
+        sub_type_val = p.get("subject_type") or "Not detected"
+        act_val = ", ".join(actions_list) if actions_list else "Not detected"
+        obj_val = ", ".join(objects_list) if objects_list else "Not detected"
+        loc_val = ", ".join(locations_list) if locations_list else "Not detected"
+        geo_scope_val = sublocs[0] if sublocs else "global"
+        claim_yr_val = ", ".join(str(y) for y in years_list) if years_list else "Not detected"
+        phase_val = p.get("event_phase") or "Not detected"
+
+        if rank_details:
+            ranking_val = ", ".join(d["phrase"] for d in rank_details)
+            ranking_scope_val = ", ".join(sorted(set(d["scope"] for d in rank_details)))
+        elif p.get("rankings"):
+            ranking_val = ", ".join(f"rank {k}: {v}" for k, v in p.get("rankings").items())
+            ranking_scope_val = "general"
+        else:
+            ranking_val = "Not detected"
+            ranking_scope_val = "Not detected"
+
         debug_claim_attrs.append({
             "proposition_id": f"P{idx}",
             "proposition_text": p.get("text", "Central Claim"),
-            "subject": p.get("subject") or "General Subject",
-            "subject_type": p.get("subject_type") or "unspecified",
-            "actions": list(p.get("actions", set())) or ["None"],
-            "objects": list(p.get("objects", set())) or ["None"],
-            "locations": list(p.get("locations", set())) or ["None"],
-            "geographic_scope": sublocs[0] if sublocs else "global",
-            "years": list(p.get("occurrence_years", set()) or p.get("years", set())) or ["None"],
-            "event_phase": p.get("event_phase", "completed"),
-            "rankings": rank_strs or ["None"]
+            "subject": sub_val,
+            "subject_type": sub_type_val,
+            "action": act_val,
+            "object": obj_val,
+            "location": loc_val,
+            "geographic_scope": geo_scope_val,
+            "claim_year": claim_yr_val,
+            "event_phase": phase_val,
+            "ranking": ranking_val,
+            "ranking_scope": ranking_scope_val,
+            "actions": actions_list if actions_list else ["Not detected"],
+            "objects": objects_list if objects_list else ["Not detected"],
+            "locations": locations_list if locations_list else ["Not detected"],
+            "years": years_list if years_list else ["Not detected"],
+            "rankings": rank_strs if rank_strs else ["Not detected"]
         })
     return debug_claim_attrs
 
@@ -1581,25 +1731,40 @@ def verify_claim_evidence(claim_text: str, title: Optional[str] = None) -> Dict[
             rank_cmp = "No ranking conflict detected"
             scope_cmp = "Compatible or background topical context"
 
+        ev_attrs = eval_res.get("debug_evidence_attributes", {})
+
         all_evaluations.append({
-            "source": item.get("source"),
-            "domain": item.get("domain"),
-            "url": item.get("url", ""),
-            "source_claim": item.get("title"),
-            "source_summary": item.get("snippet"),
-            "semantic_relevance": eval_res["semantic_relevance"],
-            "proposition_match": eval_res["matched_proposition"],
+            "source_title": item.get("title") or "Not detected",
+            "domain": item.get("domain") or "Not detected",
+            "source_url": item.get("url", ""),
+            "source_tier": tier_info.get("badge") or tier_info.get("tier_name") or "General",
+            "extracted_subject": ev_attrs.get("extracted_subject") or "Not detected",
+            "action": ev_attrs.get("action") or "Not detected",
+            "object": ev_attrs.get("object") or "Not detected",
+            "evidence_year": ev_attrs.get("evidence_year") or "Not detected",
+            "year_type": ev_attrs.get("year_type") or "Not detected",
+            "event_phase": ev_attrs.get("event_phase") or "Not detected",
+            "ranking": ev_attrs.get("ranking") or "Not detected",
+            "ranking_scope": ev_attrs.get("ranking_scope") or "Not detected",
+            "semantic_relevance": f"{int(eval_res.get('semantic_relevance', 0) * 100)}%",
+            "proposition_match": eval_res.get("matched_proposition") or "Not detected",
+            "scope_comparison": scope_cmp or "Not detected",
+            "conflict_type": eval_res.get("conflict_type") or "Not detected",
+            "final_classification": stance,
+            "classification_reason": eval_res.get("reason") or "Not detected",
+            # Backward compatibility fields
+            "source": item.get("source") or "Not detected",
+            "source_claim": item.get("title") or "Not detected",
+            "source_summary": item.get("snippet") or "",
             "entailment_result": "Direct Entailment" if stance == "SUPPORTING" else ("Direct Refutation" if stance == "CONTRADICTING" else "No Entailment"),
-            "source_reliability": tier_info["tier_name"],
-            "tier_badge": tier_info["badge"],
+            "source_reliability": tier_info.get("tier_name") or "General",
+            "tier_badge": tier_info.get("badge") or "General",
             "classification": stance,
-            "reason": eval_res["reason"],
-            "conflict_type": eval_res.get("conflict_type"),
-            "claim_attribute": eval_res.get("claim_attribute"),
-            "evidence_attribute": eval_res.get("evidence_attribute"),
-            "ranking_comparison": rank_cmp,
-            "scope_comparison": scope_cmp,
-            "final_classification_reason": eval_res["reason"]
+            "reason": eval_res.get("reason") or "Not detected",
+            "ranking_comparison": rank_cmp or "Not detected",
+            "final_classification_reason": eval_res.get("reason") or "Not detected",
+            "claim_attribute": eval_res.get("claim_attribute") or "Not detected",
+            "evidence_attribute": eval_res.get("evidence_attribute") or "Not detected"
         })
 
         if stance == "CONTRADICTING":
@@ -1620,6 +1785,8 @@ def verify_claim_evidence(claim_text: str, title: Optional[str] = None) -> Dict[
             seen_supp_publishers.add(pub_key)
             supporting.append(item)
         else:
+            item["stance"] = "CONTEXTUAL"
+            item["reason"] = "Retained as contextual reference (duplicate reporting domain)."
             contextual_raw.append(item)
 
     seen_cont_publishers = set()
@@ -1630,6 +1797,8 @@ def verify_claim_evidence(claim_text: str, title: Optional[str] = None) -> Dict[
             seen_cont_publishers.add(pub_key)
             contradicting.append(item)
         else:
+            item["stance"] = "CONTEXTUAL"
+            item["reason"] = "Retained as contextual reference (duplicate reporting domain)."
             contextual_raw.append(item)
 
     # Deduplicate contextual references
@@ -1641,6 +1810,20 @@ def verify_claim_evidence(claim_text: str, title: Optional[str] = None) -> Dict[
             seen_ctx.add(item_key)
             contextual.append(item)
 
+    # Synchronize all_evaluations with final classifications across cards, debug trace, and PDF
+    supp_keys = {(s.get("title"), s.get("url")) for s in supporting}
+    cont_keys = {(c.get("title"), c.get("url")) for c in contradicting}
+    for ev in all_evaluations:
+        k = (ev.get("source_title"), ev.get("source_url"))
+        if k in cont_keys:
+            ev["final_classification"] = "CONTRADICTING"
+            ev["classification"] = "CONTRADICTING"
+        elif k in supp_keys:
+            ev["final_classification"] = "SUPPORTING"
+            ev["classification"] = "SUPPORTING"
+        else:
+            ev["final_classification"] = "CONTEXTUAL"
+            ev["classification"] = "CONTEXTUAL"
     # Prioritize authoritative sources at top of each list
     supporting.sort(key=lambda x: not x.get("is_authoritative", False))
     contradicting.sort(key=lambda x: not x.get("is_authoritative", False))

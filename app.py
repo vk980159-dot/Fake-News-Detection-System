@@ -671,54 +671,80 @@ if st.session_state.last_verification:
         debug_trace = res["evidence_data"].get("debug_trace")
         if debug_trace:
             with st.expander("🛠️ Developer Debug Mode: Proposition Entailment Trace", expanded=False):
-                st.markdown(f"**Input Claim:** `{debug_trace.get('input_claim', '')}`")
-                st.markdown(f"**Extracted Search Query:** `{debug_trace.get('search_query', '')}`")
-                st.markdown(f"**Evidence Strength Assigned:** `{res['evidence_data'].get('evidence_strength', 'INSUFFICIENT')}`")
+                st.markdown(f"**Input Claim:** `{debug_trace.get('input_claim') or 'Not detected'}`")
+                st.markdown(f"**Extracted Search Query:** `{debug_trace.get('search_query') or 'Not detected'}`")
+                st.markdown(f"**Evidence Strength Assigned:** `{res['evidence_data'].get('evidence_strength') or 'INSUFFICIENT'}`")
                 st.markdown(f"**Independent Publishers Count:** `{res['evidence_data'].get('independent_publishers_count', 0)}`")
-                
-                # Extracted Claim Attributes
+                st.markdown("---")
+
+                # ── CLAIM TRACE ──
+                st.markdown("#### 📌 CLAIM TRACE: Proposition Attributes")
                 claim_attrs = debug_trace.get("claim_attributes", [])
                 if claim_attrs:
-                    st.markdown("#### 📌 Extracted Claim Attributes:")
                     for ca in claim_attrs:
-                        st.markdown(f"**Proposition {ca.get('proposition_id')}:** *\"{ca.get('proposition_text')}\"*")
+                        p_id = ca.get("proposition_id") or "P1"
+                        p_txt = ca.get("proposition_text") or "Central Claim"
+                        st.markdown(f"**Proposition {p_id}:** *\"{p_txt}\"*")
                         col_ca1, col_ca2 = st.columns(2)
                         with col_ca1:
-                            st.markdown(f"- **Subject:** `{ca.get('subject')}` ({ca.get('subject_type')})")
-                            st.markdown(f"- **Actions:** `{', '.join(ca.get('actions', []))}`")
-                            st.markdown(f"- **Objects:** `{', '.join(ca.get('objects', []))}`")
+                            st.markdown(f"• **Proposition ID:** `{p_id}`")
+                            st.markdown(f"• **Subject:** `{ca.get('subject') or 'Not detected'}`")
+                            st.markdown(f"• **Subject Type:** `{ca.get('subject_type') or 'Not detected'}`")
+                            st.markdown(f"• **Action:** `{ca.get('action') or 'Not detected'}`")
+                            st.markdown(f"• **Object:** `{ca.get('object') or 'Not detected'}`")
+                            st.markdown(f"• **Location:** `{ca.get('location') or 'Not detected'}`")
                         with col_ca2:
-                            st.markdown(f"- **Locations:** `{', '.join(ca.get('locations', []))}` (Scope: `{ca.get('geographic_scope')}`)")
-                            st.markdown(f"- **Occurrence Years:** `{', '.join(str(y) for y in ca.get('years', []))}` (Phase: `{ca.get('event_phase')}`)")
-                            st.markdown(f"- **Rankings / Superlatives:** `{', '.join(ca.get('rankings', []))}`")
-                    st.markdown("---")
+                            st.markdown(f"• **Geographic Scope:** `{ca.get('geographic_scope') or 'Not detected'}`")
+                            st.markdown(f"• **Claim Year:** `{ca.get('claim_year') or 'Not detected'}`")
+                            st.markdown(f"• **Event Phase:** `{ca.get('event_phase') or 'Not detected'}`")
+                            st.markdown(f"• **Ranking:** `{ca.get('ranking') or 'Not detected'}`")
+                            st.markdown(f"• **Ranking Scope:** `{ca.get('ranking_scope') or 'Not detected'}`")
+                        st.markdown("---")
                 else:
-                    st.markdown("**Claim Propositions:**")
                     for prop in debug_trace.get("claim_propositions", []):
-                        st.markdown(f"- `{prop}`")
+                        st.markdown(f"• `{prop}`")
                     st.markdown("---")
-                
-                st.markdown("#### 🔬 Retrieved Sources & Proposition Entailment:")
+
+                # ── EVIDENCE TRACE ──
+                st.markdown("#### 🔬 EVIDENCE TRACE: Source Entailment & Attribute Mapping")
                 evals = debug_trace.get("evaluations", [])
                 if evals:
                     for idx, ev in enumerate(evals, 1):
-                        badge = "✅ SUPPORTING" if ev["classification"] == "SUPPORTING" else ("🚨 CONTRADICTING" if ev["classification"] == "CONTRADICTING" else "ℹ️ CONTEXTUAL")
-                        tier_lbl = ev.get("tier_badge") or ev.get("source_tier") or "General"
-                        dom_str = f" (`{ev.get('domain')}`)" if ev.get('domain') else ""
-                        url_str = f" — [Article Link]({ev.get('url')})" if ev.get('url') else ""
-                        st.markdown(f"**{idx}. [{ev.get('source')}]**{dom_str}{url_str} — `{tier_lbl}` — **{badge}**")
-                        st.markdown(f"- **Source Title/Claim:** {ev.get('source_claim')}")
-                        st.markdown(f"- **Semantic Relevance:** `{int(ev.get('semantic_relevance', 0)*100)}%`")
-                        st.markdown(f"- **Proposition Match:** `{ev.get('proposition_match')}`")
-                        if ev.get("ranking_comparison"):
-                            st.markdown(f"- **Ranking Comparison:** `{ev.get('ranking_comparison')}`")
-                        if ev.get("scope_comparison"):
-                            st.markdown(f"- **Scope Comparison:** `{ev.get('scope_comparison')}`")
-                        if ev.get("conflict_type"):
-                            st.markdown(f"- 🚨 **Conflict Type:** `{ev.get('conflict_type')}` (Claim: `{ev.get('claim_attribute')}` vs Evidence: `{ev.get('evidence_attribute')}`)")
-                        st.markdown(f"- **Final Classification Reason:** {ev.get('final_classification_reason') or ev.get('reason')}")
-                        if ev.get("source_summary"):
-                            st.caption(f"Summary: {ev.get('source_summary')}")
+                        classification = ev.get("final_classification") or ev.get("classification") or "CONTEXTUAL"
+                        badge = "✅ SUPPORTING" if classification == "SUPPORTING" else ("🚨 CONTRADICTING" if classification == "CONTRADICTING" else "ℹ️ CONTEXTUAL")
+                        tier_lbl = ev.get("source_tier") or ev.get("tier_badge") or "General"
+                        src_name = ev.get("source_title") or ev.get("source") or f"Source {idx}"
+                        domain_val = ev.get("domain") or "Not detected"
+                        url_val = ev.get("source_url") or ev.get("url") or ""
+                        dom_str = f" (`{domain_val}`)" if domain_val != "Not detected" else ""
+                        url_str = f" — [Article Link]({url_val})" if url_val else ""
+
+                        st.markdown(f"**{idx}. [{src_name}]**{dom_str}{url_str} — `{tier_lbl}` — **{badge}**")
+
+                        col_ev1, col_ev2 = st.columns(2)
+                        with col_ev1:
+                            st.markdown(f"• **Source Title:** {ev.get('source_title') or ev.get('source_claim') or 'Not detected'}")
+                            st.markdown(f"• **Domain:** `{domain_val}`")
+                            st.markdown(f"• **Source Tier:** `{tier_lbl}`")
+                            st.markdown(f"• **Extracted Subject:** `{ev.get('extracted_subject') or 'Not detected'}`")
+                            st.markdown(f"• **Action:** `{ev.get('action') or 'Not detected'}`")
+                            st.markdown(f"• **Object:** `{ev.get('object') or 'Not detected'}`")
+                            st.markdown(f"• **Evidence Year:** `{ev.get('evidence_year') or 'Not detected'}`")
+                            st.markdown(f"• **Year Type:** `{ev.get('year_type') or 'Not detected'}`")
+                            st.markdown(f"• **Event Phase:** `{ev.get('event_phase') or 'Not detected'}`")
+                        with col_ev2:
+                            st.markdown(f"• **Ranking:** `{ev.get('ranking') or 'Not detected'}`")
+                            st.markdown(f"• **Ranking Scope:** `{ev.get('ranking_scope') or 'Not detected'}`")
+                            st.markdown(f"• **Semantic Relevance:** `{ev.get('semantic_relevance') or 'Not detected'}`")
+                            st.markdown(f"• **Proposition Match:** `{ev.get('proposition_match') or 'Not detected'}`")
+                            st.markdown(f"• **Scope Comparison:** `{ev.get('scope_comparison') or 'Not detected'}`")
+                            st.markdown(f"• **Conflict Type:** `{ev.get('conflict_type') or 'Not detected'}`")
+                            st.markdown(f"• **Final Classification:** `{classification}`")
+                            st.markdown(f"• **Classification Reason:** {ev.get('classification_reason') or ev.get('final_classification_reason') or ev.get('reason') or 'Not detected'}")
+
+                        summary_txt = ev.get("source_summary")
+                        if summary_txt:
+                            st.caption(f"Excerpt: {summary_txt}")
                         st.markdown("---")
                 else:
                     st.write("No external source evaluations recorded.")
