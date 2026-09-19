@@ -353,9 +353,113 @@ def run_contradiction_tests():
     assert verdict_7['verdict'] == 'VERIFIED', f"Expected VERIFIED, got {verdict_7['verdict']}"
     print(">>> Test 7 PASSED: Genuine factual claim corroborated as SUPPORTING and VERIFIED")
 
+    # -----------------------------------------------------------------
+    # Test 8A: 2023 Occurrence vs Planned 2029 Mission (Live Bug Regression)
+    # Claim asserts 2023 landing; evidence mentions planned 2029 sample return.
+    # Must NOT produce Temporal Contradiction! Must be CONTEXTUAL.
+    # -----------------------------------------------------------------
+    print("\n--- Test 8A: Occurrence 2023 vs Planned Future Mission 2029 ---")
+    claim_8a = "India was the first country to land a spacecraft on the Moon in 2023."
+    ev_8a = {
+        'source': 'SpaceNews',
+        'domain': 'spacenews.com',
+        'title': 'ISRO lunar roadmap',
+        'snippet': 'India landed Chandrayaan-3 on the moon and now plans a sample return mission in 2029.'
+    }
+    props_8a = decompose_claim(claim_8a)
+    eval_8a = evaluate_evidence_relevance(claim_8a, props_8a, ev_8a)
+    print(f"Stance: {eval_8a['stance']}")
+    print(f"Conflict Type: {eval_8a.get('conflict_type')}")
+    print(f"Reason: {eval_8a.get('reason')}")
+    assert eval_8a.get('conflict_type') != 'Temporal contradiction', "CRITICAL: Must not trigger false temporal contradiction for planned future year!"
+    assert eval_8a['stance'] == 'CONTEXTUAL', f"Expected CONTEXTUAL, got {eval_8a['stance']}"
+    print(">>> Test 8A PASSED: Future planned year 2029 correctly identified as CONTEXTUAL, not CONTRADICTING")
+
+    # -----------------------------------------------------------------
+    # Test 8B: 2023 Occurrence vs Conflicting 2029 Occurrence of Same Event
+    # Evidence asserts the landing itself first occurred in 2029 (direct conflict).
+    # Must be CONTRADICTING with Temporal contradiction!
+    # -----------------------------------------------------------------
+    print("\n--- Test 8B: 2023 Occurrence vs Conflicting 2029 Occurrence ---")
+    claim_8b = "India landed on the Moon in 2023."
+    ev_8b = {
+        'source': 'FuturePost',
+        'domain': 'futurepost.com',
+        'title': 'India Landing History',
+        'snippet': 'India first landed on the Moon in 2029.'
+    }
+    props_8b = decompose_claim(claim_8b)
+    eval_8b = evaluate_evidence_relevance(claim_8b, props_8b, ev_8b)
+    print(f"Stance: {eval_8b['stance']}")
+    print(f"Conflict Type: {eval_8b.get('conflict_type')}")
+    print(f"Reason: {eval_8b.get('reason')}")
+    assert eval_8b['stance'] == 'CONTRADICTING', f"Expected CONTRADICTING, got {eval_8b['stance']}"
+    assert eval_8b.get('conflict_type') == 'Temporal contradiction', f"Expected Temporal contradiction, got {eval_8b.get('conflict_type')}"
+    print(">>> Test 8B PASSED: Direct occurrence year conflict correctly identified as CONTRADICTING")
+
+    # -----------------------------------------------------------------
+    # Test 8C: Publication Year 2024 vs Event Year 2023
+    # Evidence published in 2024 confirms 2023 landing.
+    # Must be SUPPORTING (publication date does not conflict with occurrence date).
+    # -----------------------------------------------------------------
+    print("\n--- Test 8C: Publication Year 2024 vs Event Year 2023 ---")
+    claim_8c = "India landed on the Moon in 2023."
+    ev_8c = {
+        'source': 'The Hindu',
+        'domain': 'thehindu.com',
+        'title': 'Space Update',
+        'snippet': 'Published in 2024. India successfully landed Chandrayaan-3 on the Moon in 2023.'
+    }
+    props_8c = decompose_claim(claim_8c)
+    eval_8c = evaluate_evidence_relevance(claim_8c, props_8c, ev_8c)
+    print(f"Stance: {eval_8c['stance']}")
+    print(f"Reason: {eval_8c.get('reason')}")
+    assert eval_8c['stance'] == 'SUPPORTING', f"Expected SUPPORTING, got {eval_8c['stance']}"
+    print(">>> Test 8C PASSED: Publication year 2024 correctly ignored and event year 2023 matched as SUPPORTING")
+
+    # -----------------------------------------------------------------
+    # Test 8D: Publication Year Only (no landing year in evidence)
+    # Evidence only contains article publication year 2024, no occurrence year.
+    # Must be CONTEXTUAL (not CONTRADICTING).
+    # -----------------------------------------------------------------
+    print("\n--- Test 8D: Publication Year Only (no occurrence year) ---")
+    claim_8d = "India landed on the Moon in 2023."
+    ev_8d = {
+        'source': 'BBC',
+        'domain': 'bbc.com',
+        'title': 'Indian Space Tech',
+        'snippet': 'Published in 2024. Article discusses Indian lunar space technology.'
+    }
+    props_8d = decompose_claim(claim_8d)
+    eval_8d = evaluate_evidence_relevance(claim_8d, props_8d, ev_8d)
+    print(f"Stance: {eval_8d['stance']}")
+    print(f"Reason: {eval_8d.get('reason')}")
+    assert eval_8d.get('conflict_type') != 'Temporal contradiction', "CRITICAL: Publication year must not trigger temporal contradiction!"
+    assert eval_8d['stance'] == 'CONTEXTUAL', f"Expected CONTEXTUAL, got {eval_8d['stance']}"
+    print(">>> Test 8D PASSED: Publication year only correctly classified as CONTEXTUAL")
+
+    # -----------------------------------------------------------------
+    # Test 8E: Exact Matching Event Year
+    # -----------------------------------------------------------------
+    print("\n--- Test 8E: Exact Matching Event Year ---")
+    claim_8e = "India landed on the Moon in 2023."
+    ev_8e = {
+        'source': 'ISRO',
+        'domain': 'isro.gov.in',
+        'title': 'Moon Landing',
+        'snippet': 'India landed Chandrayaan-3 on the Moon in 2023.'
+    }
+    props_8e = decompose_claim(claim_8e)
+    eval_8e = evaluate_evidence_relevance(claim_8e, props_8e, ev_8e)
+    print(f"Stance: {eval_8e['stance']}")
+    print(f"Reason: {eval_8e.get('reason')}")
+    assert eval_8e['stance'] == 'SUPPORTING', f"Expected SUPPORTING, got {eval_8e['stance']}"
+    print(">>> Test 8E PASSED: Matching event year correctly classified as SUPPORTING")
+
     print("\n==================================================================")
     print("ALL ATTRIBUTE CONTRADICTION AND SCOPE ENTAILMENT TESTS PASSED!")
     print("==================================================================")
 
 if __name__ == '__main__':
     run_contradiction_tests()
+

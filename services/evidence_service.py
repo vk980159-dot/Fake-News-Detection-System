@@ -437,6 +437,104 @@ def extract_rankings(text: str) -> Dict[int, str]:
 
     return rankings
 
+PLANNED_YEAR_KEYWORDS = {
+    "plan", "plans", "planned", "planning", "target", "targets", "targeted", "targeting",
+    "schedule", "scheduled", "schedules", "scheduling", "aim", "aims", "aimed", "aiming",
+    "slated", "expected", "projected", "forecast", "forecasted", "future", "upcoming",
+    "next", "roadmap", "subsequent", "propose", "proposed", "proposes", "proposing",
+    "envisage", "envisaged", "timeline"
+}
+
+PUBLICATION_YEAR_KEYWORDS = {
+    "published", "publish", "publishes", "reported", "reporting", "posted", "updated",
+    "copyright", "accessed", "retrieved", "dateline", "byline"
+}
+
+HISTORICAL_YEAR_KEYWORDS = {
+    "prior", "predecessor", "former", "earlier", "previous", "previously"
+}
+
+def extract_temporal_metadata(text: str) -> Dict[str, Any]:
+    """
+    Extracts and classifies 4-digit years into distinct temporal categories:
+    - occurrence_years: when the actual asserted event occurred
+    - planned_years: when a future or scheduled mission/event is planned
+    - publication_years: article publication or filing dates
+    - historical_years: references to prior missions or historical context
+    Also determines event_phase: 'completed', 'planned', 'historical', or 'unspecified'.
+    """
+    text_lower = text.lower()
+    details = []
+    occurrence_years = set()
+    planned_years = set()
+    publication_years = set()
+    historical_years = set()
+    all_years = set()
+
+    for m in re.finditer(r'\b(19\d\d|20\d\d)\b', text):
+        y_str = m.group(1)
+        y_val = int(y_str)
+        all_years.add(y_str)
+
+        start_idx = m.start()
+        win_start = max(0, start_idx - 60)
+        win_end = min(len(text_lower), start_idx + 60)
+        window = text_lower[win_start:win_end]
+        tokens = set(re.findall(r'[a-z\-]+', window))
+
+        is_planned = bool(tokens.intersection(PLANNED_YEAR_KEYWORDS)) or bool(
+            re.search(r'\b(?:will|would|to be)\s+(?:launch|land|operate|deploy|send|conduct)\b', window)
+        )
+        is_publication = bool(tokens.intersection(PUBLICATION_YEAR_KEYWORDS)) or bool(
+            re.search(rf'\b(?:copyright|\(c\)|\(reuters|\(ap|\(bbc)\b[^\.\,\;]{{0,30}}\b{y_str}\b', window)
+        )
+        is_historical = (y_val < 2020) and (
+            bool(tokens.intersection(HISTORICAL_YEAR_KEYWORDS)) or
+            bool(re.search(rf'\b(?:since|first since|back in)\s+{y_str}\b', window))
+        )
+
+        if is_planned:
+            y_type = "planned"
+            phase = "planned"
+            planned_years.add(y_str)
+        elif is_publication:
+            y_type = "publication"
+            phase = "publication"
+            publication_years.add(y_str)
+        elif is_historical:
+            y_type = "historical"
+            phase = "historical"
+            historical_years.add(y_str)
+        else:
+            y_type = "occurrence"
+            phase = "completed"
+            occurrence_years.add(y_str)
+
+        details.append({
+            "year": y_str,
+            "year_int": y_val,
+            "type": y_type,
+            "phase": phase,
+            "window": window
+        })
+
+    if planned_years and not occurrence_years:
+        overall_phase = "planned"
+    elif occurrence_years:
+        overall_phase = "completed"
+    else:
+        overall_phase = "unspecified"
+
+    return {
+        "all_years": all_years,
+        "details": details,
+        "occurrence_years": occurrence_years,
+        "planned_years": planned_years,
+        "publication_years": publication_years,
+        "historical_years": historical_years,
+        "event_phase": overall_phase
+    }
+
 def extract_quantities(text: str, excluded_years: Set[str] = None) -> Dict[int, str]:
     """
     Extracts numerical quantities, population/headcounts, and counts.
@@ -640,6 +738,7 @@ def decompose_claim(claim_text: str, title: Optional[str] = None) -> List[Dict[s
             rankings = extract_rankings(c_clean)
             ranking_details = extract_ranking_details(c_clean)
             sub_locations = extract_sub_locations(c_clean)
+            temporal_meta = extract_temporal_metadata(c_clean)
             dates = extract_dates(c_clean)
             months = extract_months(c_clean) or overall_months
             parsed_quantities = extract_quantities(c_clean, years)
@@ -668,6 +767,12 @@ def decompose_claim(claim_text: str, title: Optional[str] = None) -> List[Dict[s
                 "rankings": rankings,
                 "ranking_details": ranking_details,
                 "years": years,
+                "occurrence_years": temporal_meta["occurrence_years"],
+                "planned_years": temporal_meta["planned_years"],
+                "publication_years": temporal_meta["publication_years"],
+                "historical_years": temporal_meta["historical_years"],
+                "event_phase": temporal_meta["event_phase"],
+                "temporal_details": temporal_meta["details"],
                 "dates": dates,
                 "months": months,
                 "modifiers": modifiers,
@@ -701,6 +806,7 @@ def decompose_claim(claim_text: str, title: Optional[str] = None) -> List[Dict[s
         rankings = extract_rankings(raw_text)
         ranking_details = extract_ranking_details(raw_text)
         sub_locations = extract_sub_locations(raw_text)
+        temporal_meta = extract_temporal_metadata(raw_text)
         dates = extract_dates(raw_text)
         months = extract_months(raw_text)
         parsed_quantities = extract_quantities(raw_text, years)
@@ -728,6 +834,12 @@ def decompose_claim(claim_text: str, title: Optional[str] = None) -> List[Dict[s
             "rankings": rankings,
             "ranking_details": ranking_details,
             "years": years,
+            "occurrence_years": temporal_meta["occurrence_years"],
+            "planned_years": temporal_meta["planned_years"],
+            "publication_years": temporal_meta["publication_years"],
+            "historical_years": temporal_meta["historical_years"],
+            "event_phase": temporal_meta["event_phase"],
+            "temporal_details": temporal_meta["details"],
             "dates": dates,
             "months": months,
             "modifiers": modifiers,
@@ -924,7 +1036,13 @@ def evaluate_evidence_relevance(
             ev_locations.add(LOCATION_TO_CANONICAL[w])
         elif normalize_word(w) in LOCATION_TO_CANONICAL:
             ev_locations.add(LOCATION_TO_CANONICAL[normalize_word(w)])
-    ev_years = set(re.findall(r'\b(19\d\d|20\d\d)\b', combined_ev))
+    ev_temporal = extract_temporal_metadata(combined_ev)
+    ev_years = ev_temporal["all_years"]
+    ev_occ_years = ev_temporal["occurrence_years"]
+    ev_planned_years = ev_temporal["planned_years"]
+    ev_pub_years = ev_temporal["publication_years"]
+    ev_hist_years = ev_temporal["historical_years"]
+    ev_event_phase = ev_temporal["event_phase"]
     ev_dates = extract_dates(combined_ev)
     ev_months = extract_months(combined_ev)
     ev_quantities = set(re.findall(r'\b\d{1,3}(?:,\d{3})+\b|\b\d+\b', combined_ev))
@@ -1107,20 +1225,25 @@ def evaluate_evidence_relevance(
                         "reason": f"Evidence directly contradicts the event date: claim asserts '{claim_d}' but evidence reports '{ev_d}'."
                     }
 
-            # A5: Temporal Year Contradiction (e.g. 2025 vs 2027)
-            if prop.get("years") and ev_years:
-                if not prop["years"].intersection(ev_years):
-                    claim_y = list(prop["years"])[0]
-                    ev_y = list(ev_years)[0]
-                    return {
-                        "stance": "CONTRADICTING",
-                        "semantic_relevance": 0.95,
-                        "matched_proposition": prop_label,
-                        "conflict_type": "Temporal contradiction",
-                        "claim_attribute": claim_y,
-                        "evidence_attribute": ev_y,
-                        "reason": f"Evidence directly contradicts the timeline/year: claim asserts '{claim_y}' but evidence reports '{ev_y}'."
-                    }
+            # A5: Temporal Year Contradiction (Strict Same-Event Occurrence Date Conflict)
+            prop_occ_years = prop.get("occurrence_years", set()) or prop.get("years", set())
+            if prop_occ_years and ev_occ_years:
+                conflicting_occ = ev_occ_years - prop_occ_years
+                if not prop_occ_years.intersection(ev_occ_years) and conflicting_occ:
+                    same_event_action = action_match and object_match and not location_conflict
+                    same_phase = (prop.get("event_phase", "completed") == ev_event_phase) or (ev_event_phase != "planned")
+                    if same_event_action and same_phase:
+                        claim_y = list(prop_occ_years)[0]
+                        ev_y = list(conflicting_occ)[0]
+                        return {
+                            "stance": "CONTRADICTING",
+                            "semantic_relevance": 0.95,
+                            "matched_proposition": prop_label,
+                            "conflict_type": "Temporal contradiction",
+                            "claim_attribute": claim_y,
+                            "evidence_attribute": ev_y,
+                            "reason": f"Evidence directly contradicts the event occurrence year: claim asserts '{claim_y}' but reliable evidence confirms '{ev_y}' for the same event."
+                        }
 
             # A6: Modifier Contradiction (e.g. permanent vs temporary)
             for mod in prop.get("modifiers", set()):
@@ -1223,10 +1346,14 @@ def evaluate_evidence_relevance(
             if not ("permanent" in ev_modifiers or "colony" in ev_objects):
                 modifier_satisfied = False
 
+        # Temporal year conflict only exists when evidence reports a conflicting OCCURRENCE year
+        # for the same event action (never for planned years, publication years, or historical references)
         year_conflict = False
-        if prop.get("years") and ev_years:
-            if not prop["years"].intersection(ev_years):
-                year_conflict = True
+        prop_occ_years = prop.get("occurrence_years", set()) or prop.get("years", set())
+        if prop_occ_years and ev_occ_years:
+            if not prop_occ_years.intersection(ev_occ_years):
+                if action_match and object_match and not location_conflict and ev_event_phase != "planned":
+                    year_conflict = True
 
         non_year_prop_qty = prop.get("quantities", set()) - prop.get("years", set())
         non_year_ev_qty = ev_quantities - ev_years
@@ -1246,7 +1373,8 @@ def evaluate_evidence_relevance(
         else:
             entails = (overlap_ratio >= 0.50 or len(overlap) >= 3)
 
-        detail_score = 0.10 if (not year_conflict and bool(prop.get("years", set()).intersection(ev_years))) else (0.05 if not year_conflict else 0.0)
+        has_matching_year = bool(prop_occ_years and prop_occ_years.intersection(ev_occ_years or ev_years))
+        detail_score = 0.10 if (not year_conflict and has_matching_year) else (0.05 if not year_conflict else 0.0)
         total_score = max(0.0, total_score + detail_score)
 
         if entails and total_score > best_score:
@@ -1260,6 +1388,8 @@ def evaluate_evidence_relevance(
                 best_stance = "CONTEXTUAL"
                 if location_conflict:
                     best_reason = f"Mentions related entities, but refers to a different location ({list(ev_locations)} vs {list(prop.get('locations', set()))})."
+                elif year_conflict and prop_occ_years and ev_occ_years:
+                    best_reason = f"Corroborates the general topic, but refers to a conflicting event occurrence year ({list(ev_occ_years)[0]} vs {list(prop_occ_years)[0]})."
                 elif not ranking_satisfied and prop_ranks:
                     best_reason = ranking_demotion_reason or f"Corroborates the general event ({prop.get('subject') or 'topic'}), but lacks factual confirmation of claim ranking ('{list(prop_ranks.values())[0]}')."
                 elif not quantity_satisfied and prop_qtys:
