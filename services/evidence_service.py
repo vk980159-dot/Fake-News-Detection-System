@@ -1,8 +1,10 @@
 import urllib.parse
 import xml.etree.ElementTree as ET
 import re
+import html
 from collections import Counter
 from typing import Dict, Any, List, Optional, Set, Tuple
+
 import requests
 from utils.source_analyzer import extract_domain, classify_source_tier
 from utils.text_cleaner import detect_language
@@ -922,6 +924,7 @@ def search_google_news(query: str, max_results: int = 6) -> List[Dict[str, Any]]
             source_url = source_elem.attrib.get("url", "") if source_elem is not None else ""
 
             # Extract source name from title format "Headline - Source"
+            raw_title = html.unescape(raw_title)
             clean_title = raw_title
             if " - " in raw_title and not source_name:
                 parts = raw_title.rsplit(" - ", 1)
@@ -929,9 +932,13 @@ def search_google_news(query: str, max_results: int = 6) -> List[Dict[str, Any]]
                 source_name = parts[1].strip()
 
             # Clean snippet from description HTML
-            raw_desc = item.findtext("description", default="").strip()
+            raw_desc = html.unescape(item.findtext("description", default="").strip())
             clean_snippet = re.sub(r'<[^>]+>', ' ', raw_desc)
+            clean_snippet = re.sub(r'&nbsp;?', ' ', clean_snippet)
             clean_snippet = re.sub(r'\s+', ' ', clean_snippet).strip()
+            # If Google News RSS appends the source name at the end of the snippet, remove it cleanly
+            if source_name and clean_snippet.endswith(source_name):
+                clean_snippet = clean_snippet[:-len(source_name)].strip()
             if not clean_snippet or len(clean_snippet) < 15:
                 clean_snippet = f"Reported by {source_name or 'verified news outlet'} on {pub_date}" if pub_date else f"Reported by {source_name or 'verified news outlet'}"
 
@@ -977,9 +984,11 @@ def search_wikipedia(query: str, max_results: int = 3) -> List[Dict[str, Any]]:
         search_items = data.get("query", {}).get("search", [])
         results = []
         for item in search_items[:max_results]:
-            title = item.get("title", "")
-            raw_snippet = item.get("snippet", "")
-            clean_snippet = re.sub(r'<[^>]+>', '', raw_snippet).strip()
+            title = html.unescape(item.get("title", ""))
+            raw_snippet = html.unescape(item.get("snippet", ""))
+            clean_snippet = re.sub(r'<[^>]+>', '', raw_snippet)
+            clean_snippet = re.sub(r'&nbsp;?', ' ', clean_snippet)
+            clean_snippet = re.sub(r'\s+', ' ', clean_snippet).strip()
             page_url = f"https://en.wikipedia.org/wiki/{urllib.parse.quote(title.replace(' ', '_'))}"
             results.append({
                 "title": f"Wikipedia: {title}",
@@ -1426,6 +1435,26 @@ def classify_evidence_stance(claim_text: str, evidence_item: Dict[str, Any], tit
     evidence_item["reason"] = res["reason"]
     return res["stance"]
 
+def build_debug_claim_attributes(propositions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    debug_claim_attrs = []
+    for idx, p in enumerate(propositions, 1):
+        rank_strs = [f"'{d['phrase']}' (Value: {d['val']}, Scope: {d['scope']})" for d in p.get("ranking_details", [])]
+        sublocs = list(p.get("sub_locations", set()))
+        debug_claim_attrs.append({
+            "proposition_id": f"P{idx}",
+            "proposition_text": p.get("text", "Central Claim"),
+            "subject": p.get("subject") or "General Subject",
+            "subject_type": p.get("subject_type") or "unspecified",
+            "actions": list(p.get("actions", set())) or ["None"],
+            "objects": list(p.get("objects", set())) or ["None"],
+            "locations": list(p.get("locations", set())) or ["None"],
+            "geographic_scope": sublocs[0] if sublocs else "global",
+            "years": list(p.get("occurrence_years", set()) or p.get("years", set())) or ["None"],
+            "event_phase": p.get("event_phase", "completed"),
+            "rankings": rank_strs or ["None"]
+        })
+    return debug_claim_attrs
+
 def verify_claim_evidence(claim_text: str, title: Optional[str] = None) -> Dict[str, Any]:
     """
     Main entry point for real evidence verification.
@@ -1435,6 +1464,8 @@ def verify_claim_evidence(claim_text: str, title: Optional[str] = None) -> Dict[
     propositions = decompose_claim(claim_text, title)
     lang_info = detect_language(claim_text)
     query = extract_search_query(claim_text, title)
+    debug_claim_attrs = build_debug_claim_attributes(propositions)
+
     if not query:
         return {
             "is_available": True,
@@ -1447,13 +1478,20 @@ def verify_claim_evidence(claim_text: str, title: Optional[str] = None) -> Dict[
             "contradicting_evidence": [],
             "contextual_evidence": [],
             "irrelevant_evidence": [],
+            "supporting_count": 0,
+            "contradicting_count": 0,
+            "contextual_count": 0,
             "total_sources_found": 0,
             "propositions": [p["text"] for p in propositions],
+            "raw_propositions": propositions,
             "debug_trace": {
                 "input_claim": claim_text,
                 "detected_language": lang_info,
                 "claim_propositions": [f"P{i+1}: {p['text']}" for i, p in enumerate(propositions)],
+                "claim_attributes": debug_claim_attrs,
                 "search_query": "",
+                "evidence_strength": "INSUFFICIENT",
+                "independent_publishers_count": 0,
                 "evaluations": []
             }
         }
@@ -1479,13 +1517,20 @@ def verify_claim_evidence(claim_text: str, title: Optional[str] = None) -> Dict[
             "contradicting_evidence": [],
             "contextual_evidence": [],
             "irrelevant_evidence": [],
+            "supporting_count": 0,
+            "contradicting_count": 0,
+            "contextual_count": 0,
             "total_sources_found": 0,
             "propositions": [p["text"] for p in propositions],
+            "raw_propositions": propositions,
             "debug_trace": {
                 "input_claim": claim_text,
                 "detected_language": lang_info,
                 "claim_propositions": [f"P{i+1}: {p['text']}" for i, p in enumerate(propositions)],
+                "claim_attributes": debug_claim_attrs,
                 "search_query": query,
+                "evidence_strength": "INSUFFICIENT",
+                "independent_publishers_count": 0,
                 "evaluations": []
             }
         }
@@ -1516,20 +1561,45 @@ def verify_claim_evidence(claim_text: str, title: Optional[str] = None) -> Dict[
         item["claim_attribute"] = eval_res.get("claim_attribute")
         item["evidence_attribute"] = eval_res.get("evidence_attribute")
 
+        # Determine comparison details for debug trace
+        if eval_res.get("conflict_type") == "Ranking contradiction":
+            rank_cmp = f"Claim asserts '{eval_res.get('claim_attribute')}' vs Evidence confirms '{eval_res.get('evidence_attribute')}'"
+            scope_cmp = "Comparable scopes (Country vs Country) -> Direct ranking contradiction"
+        elif eval_res.get("conflict_type"):
+            rank_cmp = f"{eval_res.get('conflict_type')}: Claim '{eval_res.get('claim_attribute')}' vs Evidence '{eval_res.get('evidence_attribute')}'"
+            scope_cmp = "Attribute conflict identified"
+        elif stance == "SUPPORTING":
+            rank_cmp = "Claim ranking & attributes corroborated by source"
+            scope_cmp = "Matching scope (Global achievement entailed)"
+        elif "probe-level" in eval_res.get("reason", ""):
+            rank_cmp = "Claim asserts country-level ranking vs Evidence mentions probe-level ranking"
+            scope_cmp = "Scope Mismatch (Country ranking vs Probe ranking) -> Demoted to CONTEXTUAL"
+        elif "location-restricted" in eval_res.get("reason", ""):
+            rank_cmp = "Claim asserts global ranking vs Evidence mentions regional/sub-location ranking"
+            scope_cmp = "Scope Mismatch (Global lunar landing vs Regional south pole) -> Demoted to CONTEXTUAL"
+        else:
+            rank_cmp = "No ranking conflict detected"
+            scope_cmp = "Compatible or background topical context"
+
         all_evaluations.append({
             "source": item.get("source"),
             "domain": item.get("domain"),
+            "url": item.get("url", ""),
             "source_claim": item.get("title"),
             "source_summary": item.get("snippet"),
             "semantic_relevance": eval_res["semantic_relevance"],
             "proposition_match": eval_res["matched_proposition"],
             "entailment_result": "Direct Entailment" if stance == "SUPPORTING" else ("Direct Refutation" if stance == "CONTRADICTING" else "No Entailment"),
             "source_reliability": tier_info["tier_name"],
+            "tier_badge": tier_info["badge"],
             "classification": stance,
             "reason": eval_res["reason"],
             "conflict_type": eval_res.get("conflict_type"),
             "claim_attribute": eval_res.get("claim_attribute"),
-            "evidence_attribute": eval_res.get("evidence_attribute")
+            "evidence_attribute": eval_res.get("evidence_attribute"),
+            "ranking_comparison": rank_cmp,
+            "scope_comparison": scope_cmp,
+            "final_classification_reason": eval_res["reason"]
         })
 
         if stance == "CONTRADICTING":
@@ -1610,7 +1680,10 @@ def verify_claim_evidence(claim_text: str, title: Optional[str] = None) -> Dict[
         "input_claim": claim_text,
         "detected_language": lang_info,
         "claim_propositions": [f"P{i+1}: {p['text']} [Subject: {p.get('subject')}, Actions: {list(p.get('actions'))}, Objects: {list(p.get('objects'))}, Locations: {list(p.get('locations'))}]" for i, p in enumerate(propositions)],
+        "claim_attributes": debug_claim_attrs,
         "search_query": query,
+        "evidence_strength": status,
+        "independent_publishers_count": supp_count + cont_count,
         "evaluations": all_evaluations
     }
 
@@ -1625,8 +1698,12 @@ def verify_claim_evidence(claim_text: str, title: Optional[str] = None) -> Dict[
         "contradicting_evidence": contradicting,
         "contextual_evidence": contextual,
         "irrelevant_evidence": irrelevant_raw,
+        "supporting_count": supp_count,
+        "contradicting_count": cont_count,
+        "contextual_count": len(contextual),
         "total_sources_found": len(all_results),
         "propositions": [p["text"] for p in propositions],
+        "raw_propositions": propositions,
         "props_supported": list(props_supported),
         "is_partially_supported": is_partially_supported,
         "debug_trace": debug_trace

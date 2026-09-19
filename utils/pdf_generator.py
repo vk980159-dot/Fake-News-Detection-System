@@ -105,16 +105,25 @@ def generate_pdf_report(report_data: Dict[str, Any]) -> bytes:
         alignment=1 # Centered
     )
     
+    supp_cnt = report_data.get("supporting_count", len(report_data.get("supporting_evidence", [])))
+    cont_cnt = report_data.get("contradicting_count", len(report_data.get("contradicting_evidence", [])))
+    ctx_cnt = report_data.get("contextual_count", len(report_data.get("contextual_evidence", [])))
+    verdict_desc = report_data.get("verdict_desc", "")
+
     verdict_table_data = [
         [Paragraph(f"FINAL VERDICT: {verdict}", verdict_style)],
-        [Paragraph(f"<b>Model Confidence:</b> {report_data.get('confidence', 0):.2f}% &nbsp;|&nbsp; <b>ML Prediction:</b> {report_data.get('ml_prediction', 'N/A')} &nbsp;|&nbsp; <b>Evidence Status:</b> {report_data.get('evidence_status', 'N/A')}", ParagraphStyle('VerdictSub', parent=body_style, alignment=1))]
+        [Paragraph(f"<b>Model Confidence:</b> {report_data.get('confidence', 0):.2f}% &nbsp;|&nbsp; <b>ML Prediction:</b> {report_data.get('ml_prediction', 'N/A')} &nbsp;|&nbsp; <b>Evidence Status:</b> {report_data.get('evidence_status', 'N/A')}", ParagraphStyle('VerdictSub', parent=body_style, alignment=1))],
+        [Paragraph(f"<b>Evidence Counts:</b> Supporting: {supp_cnt} &nbsp;|&nbsp; Contradicting: {cont_cnt} &nbsp;|&nbsp; Contextual: {ctx_cnt}", ParagraphStyle('VerdictCounts', parent=body_style, alignment=1, textColor=colors.HexColor('#475569')))]
     ]
+    if verdict_desc:
+        verdict_table_data.append([Paragraph(f"<b>Decision Summary:</b> {verdict_desc}", ParagraphStyle('VerdictDesc', parent=body_style, alignment=1, fontSize=8.5, textColor=colors.HexColor('#334155')))])
+
     verdict_table = Table(verdict_table_data, colWidths=[530])
     verdict_table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F8FAFC')),
         ('BOX', (0, 0), (-1, -1), 1.5, verdict_color),
-        ('TOPPADDING', (0, 0), (-1, -1), 8),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
         ('LEFTPADDING', (0, 0), (-1, -1), 12),
         ('RIGHTPADDING', (0, 0), (-1, -1), 12),
     ]))
@@ -147,7 +156,32 @@ def generate_pdf_report(report_data: Dict[str, Any]) -> bytes:
         elements.append(Paragraph("<b>Extracted Content Excerpt:</b>", body_style))
         elements.append(Paragraph(f"<i>\"{excerpt}\"</i>", ParagraphStyle('Excerpt', parent=body_style, textColor=colors.HexColor('#475569'))))
         elements.append(Spacer(1, 8))
-    
+
+    # ── Detailed Verification Points ──────────────────────────────────────
+    vp = report_data.get("verification_points")
+    if vp and isinstance(vp, dict):
+        elements.append(Paragraph("📋 Detailed Verification Points", section_heading))
+        vp_data = [
+            [Paragraph("<b>Claim Subject:</b>", body_style), Paragraph(str(vp.get("claim_subject", "N/A")), body_style),
+             Paragraph("<b>Ranking Claimed:</b>", body_style), Paragraph(str(vp.get("ranking_claimed", "N/A")), body_style)],
+            [Paragraph("<b>Action:</b>", body_style), Paragraph(str(vp.get("action", "N/A")), body_style),
+             Paragraph("<b>Ranking in Evidence:</b>", body_style), Paragraph(str(vp.get("ranking_found_in_evidence", "N/A")), body_style)],
+            [Paragraph("<b>Object / Target:</b>", body_style), Paragraph(str(vp.get("object", "N/A")), body_style),
+             Paragraph("<b>Classification:</b>", body_style), Paragraph(str(vp.get("classification", "N/A")), body_style)],
+            [Paragraph("<b>Time / Date:</b>", body_style), Paragraph(str(vp.get("time", "N/A")), body_style),
+             Paragraph("<b>Reason:</b>", body_style), Paragraph(str(vp.get("reason", "N/A")), body_style)],
+        ]
+        vp_table = Table(vp_data, colWidths=[95, 170, 105, 160])
+        vp_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F8FAFC')),
+            ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#E2E8F0')),
+            ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ]))
+        elements.append(vp_table)
+        elements.append(Spacer(1, 8))
+
     # ── AI Reasoning & Evidence Fusion ─────────────────────────────────────
     elements.append(Paragraph("🤖 AI Reasoning & Decision Rationale", section_heading))
     reasoning_list = report_data.get("reasoning", [])
@@ -165,41 +199,66 @@ def generate_pdf_report(report_data: Dict[str, Any]) -> bytes:
     elements.append(Paragraph("🔍 Evidence Corroboration", section_heading))
     supporting = report_data.get("supporting_evidence", [])
     contradicting = report_data.get("contradicting_evidence", [])
+    contextual = report_data.get("contextual_evidence", [])
     
     if supporting:
-        elements.append(Paragraph("<b>Supporting Sources Found:</b>", ParagraphStyle('SuppHead', parent=body_style, textColor=colors.HexColor('#15803D'))))
-        for item in supporting[:3]:
+        elements.append(Paragraph(f"<b>Supporting Sources Found ({len(supporting)}):</b>", ParagraphStyle('SuppHead', parent=body_style, textColor=colors.HexColor('#15803D'))))
+        for item in supporting:
             title = item.get('title', 'Untitled')
             source = item.get('source', 'Unknown Source')
             link = item.get('url', '')
             tier = item.get('source_tier') or item.get('tier_badge') or 'Public Source'
             tier_str = f" [{tier}]" if tier else ""
-            elements.append(Paragraph(f"• <b>[{source}]{tier_str}</b> {title} ({link[:55]}...)" if len(link) > 55 else f"• <b>[{source}]{tier_str}</b> {title} ({link})", body_style))
+            link_display = f" ({link[:50]}...)" if len(link) > 50 else (f" ({link})" if link else "")
+            elements.append(Paragraph(f"• <b>[{source}]{tier_str}</b> {title}{link_display}", body_style))
+            if item.get("reason"):
+                elements.append(Paragraph(f"&nbsp;&nbsp;&nbsp;&nbsp;💡 <i>Entailment: {item['reason']}</i>", ParagraphStyle('SuppReason', parent=body_style, textColor=colors.HexColor('#166534'), fontSize=8.5)))
             elements.append(Spacer(1, 2))
         elements.append(Spacer(1, 4))
     else:
-        elements.append(Paragraph("• <i>No direct corroborating public reports identified.</i>", body_style))
+        if contradicting:
+            elements.append(Paragraph(f"• <i>No direct corroborating public reports identified. (Note: {len(contradicting)} contradicting source(s) identified below).</i>", body_style))
+        else:
+            elements.append(Paragraph("• <i>No direct corroborating public reports identified.</i>", body_style))
         elements.append(Spacer(1, 4))
         
     if contradicting:
-        elements.append(Paragraph("<b>Contradicting / Debunking Sources Found:</b>", ParagraphStyle('ContHead', parent=body_style, textColor=colors.HexColor('#B91C1C'))))
-        for item in contradicting[:3]:
+        elements.append(Paragraph(f"<b>Contradicting / Refuting Sources Found ({len(contradicting)}):</b>", ParagraphStyle('ContHead', parent=body_style, textColor=colors.HexColor('#B91C1C'))))
+        for item in contradicting:
             title = item.get('title', 'Untitled')
             source = item.get('source', 'Unknown Source')
             link = item.get('url', '')
             tier = item.get('source_tier') or item.get('tier_badge') or 'Public Source'
             tier_str = f" [{tier}]" if tier else ""
-            elements.append(Paragraph(f"• <b>[{source}]{tier_str}</b> {title} ({link[:55]}...)" if len(link) > 55 else f"• <b>[{source}]{tier_str}</b> {title} ({link})", body_style))
+            link_display = f" ({link[:50]}...)" if len(link) > 50 else (f" ({link})" if link else "")
+            elements.append(Paragraph(f"• <b>[{source}]{tier_str}</b> {title}{link_display}", body_style))
             conflict_type = item.get('conflict_type')
             if conflict_type:
                 claim_attr = item.get('claim_attribute', '')
                 ev_attr = item.get('evidence_attribute', '')
-                conflict_detail = f"&nbsp;&nbsp;&nbsp;&nbsp;🚨 <i>{conflict_type}: Claim asserted '{claim_attr}' vs Evidence reported '{ev_attr}'</i>"
+                conflict_detail = f"&nbsp;&nbsp;&nbsp;&nbsp;🚨 <i>{conflict_type}: Claim asserted '{claim_attr}' vs Evidence confirmed '{ev_attr}'</i>"
                 elements.append(Paragraph(conflict_detail, ParagraphStyle('ConflictStyle', parent=body_style, textColor=colors.HexColor('#DC2626'), fontSize=8.5)))
+            if item.get("reason"):
+                elements.append(Paragraph(f"&nbsp;&nbsp;&nbsp;&nbsp;💡 <i>Refutation logic: {item['reason']}</i>", ParagraphStyle('ContReason', parent=body_style, textColor=colors.HexColor('#7F1D1D'), fontSize=8.5)))
             elements.append(Spacer(1, 2))
         elements.append(Spacer(1, 4))
     else:
         elements.append(Paragraph("• <i>No direct contradictory reports identified.</i>", body_style))
+        elements.append(Spacer(1, 4))
+
+    if contextual:
+        elements.append(Paragraph(f"<b>Contextual Background Sources ({len(contextual)}):</b>", ParagraphStyle('CtxHead', parent=body_style, textColor=colors.HexColor('#475569'))))
+        for item in contextual[:5]:
+            title = item.get('title', 'Untitled')
+            source = item.get('source', 'Unknown Source')
+            link = item.get('url', '')
+            tier = item.get('source_tier') or item.get('tier_badge') or 'Public Source'
+            tier_str = f" [{tier}]" if tier else ""
+            link_display = f" ({link[:50]}...)" if len(link) > 50 else (f" ({link})" if link else "")
+            elements.append(Paragraph(f"• <b>[{source}]{tier_str}</b> {title}{link_display}", body_style))
+            if item.get("reason"):
+                elements.append(Paragraph(f"&nbsp;&nbsp;&nbsp;&nbsp;ℹ️ <i>Context: {item['reason']}</i>", ParagraphStyle('CtxReason', parent=body_style, textColor=colors.HexColor('#64748B'), fontSize=8.5)))
+            elements.append(Spacer(1, 2))
         elements.append(Spacer(1, 4))
         
     # ── Technical Disclaimer & Viva Information ────────────────────────────

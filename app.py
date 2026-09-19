@@ -338,6 +338,7 @@ if verify_button and has_active_text:
 
         # Step 4: Real Evidence Search (No Fabrication)
         evidence_data = verify_claim_evidence(raw_content, active.get("title", ""))
+        evidence_data["claim"] = raw_content
 
         # Step 5: Verdict Fusion
         verdict_res = fuse_verdict(
@@ -401,6 +402,86 @@ if verify_button and has_active_text:
             "Domain": source_analysis.get("domain", "Direct Input")
         })
 
+def render_evidence_card(item: dict, classification: str, index: int):
+    """
+    Renders an evidence item in a clean, professional, fully-wrapped structured card.
+    Guarantees no truncated text, clear proposition matching, and expandable full details.
+    """
+    tier_label = item.get("tier_badge") or item.get("source_tier") or "Public Source"
+    source_name = item.get("source") or "Independent Publisher"
+    domain = item.get("domain") or "news.google.com"
+    title = item.get("title") or "Untitled Report"
+    url = item.get("url") or "#"
+    pub_date = item.get("pub_date") or "Recent"
+    matched_prop = item.get("matched_proposition") or "P1 (Central Claim)"
+    excerpt = item.get("snippet") or "No excerpt available."
+    reason = item.get("reason") or "Evidence relevance verified."
+    conflict_type = item.get("conflict_type")
+    claim_attr = item.get("claim_attribute")
+    ev_attr = item.get("evidence_attribute")
+
+    if classification == "SUPPORTING":
+        badge_cls = "badge-high"
+        card_border = "#16a34a"
+        bg_tint = "#f0fdf4"
+        icon = "✅"
+    elif classification == "CONTRADICTING":
+        badge_cls = "badge-low"
+        card_border = "#dc2626"
+        bg_tint = "#fef2f2"
+        icon = "🚨"
+    else:
+        badge_cls = "badge-medium"
+        card_border = "#64748b"
+        bg_tint = "#f8fafc"
+        icon = "ℹ️"
+
+    st.markdown(f"""
+    <div style="border: 1.5px solid {card_border}; border-radius: 10px; padding: 16px 20px; margin-bottom: 16px; background-color: {bg_tint}; word-wrap: break-word; white-space: normal;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; margin-bottom: 8px;">
+            <span class="metric-badge {badge_cls}" style="font-size: 0.9rem; padding: 4px 12px;">
+                {icon} {classification}
+            </span>
+            <span style="font-size: 0.85rem; color: #475569; font-weight: 500;">
+                🏛️ {tier_label} &nbsp;|&nbsp; 📅 {pub_date}
+            </span>
+        </div>
+        <h4 style="margin: 6px 0 8px 0; color: #0f172a; font-size: 1.15rem; line-height: 1.4;">
+            <a href="{url}" target="_blank" style="text-decoration: none; color: #1e40af;">
+                {title}
+            </a>
+        </h4>
+        <div style="font-size: 0.85rem; color: #64748b; margin-bottom: 10px;">
+            <b>Source:</b> {source_name} &nbsp;•&nbsp; <b>Domain:</b> <code>{domain}</code> &nbsp;•&nbsp; 
+            <a href="{url}" target="_blank" style="color: #2563eb; text-decoration: underline; word-break: break-all;">
+                Direct Article Link ↗
+            </a>
+        </div>
+        <div style="font-size: 0.9rem; color: #334155; margin-bottom: 4px;">
+            🎯 <b>Matched Proposition:</b> <code>{matched_prop}</code>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if conflict_type:
+        st.error(
+            f"🚨 **{conflict_type}:**  \n"
+            f"• **Claim Asserted:** `{claim_attr}`  \n"
+            f"• **Evidence Confirms:** `{ev_attr}`"
+        )
+
+    st.markdown("**Evidence Excerpt:**")
+    st.info(f"\"{excerpt}\"")
+    if len(excerpt) > 180 or len(title) > 100:
+        with st.expander("📖 Read full evidence & details", expanded=False):
+            st.write(f"**Full Headline:** {title}")
+            st.write(f"**Source URL:** {url}")
+            st.write(f"**Publisher / Domain:** {source_name} (`{domain}`)")
+            st.write(f"**Full Snippet / Excerpt:** {excerpt}")
+
+    st.markdown(f"💡 **Explanation:** {reason}")
+    st.markdown("---")
+
 # ─── Render Verification Results ──────────────────────────────────────────────
 if st.session_state.last_verification:
     res = st.session_state.last_verification
@@ -418,20 +499,20 @@ if st.session_state.last_verification:
     }
     banner_cls = banner_classes.get(verdict, "verdict-uncertain")
 
-    supp_cnt = len(res["evidence_data"].get("supporting_evidence", []))
-    cont_cnt = len(res["evidence_data"].get("contradicting_evidence", []))
+    supp_cnt = res["evidence_data"].get("supporting_count", len(res["evidence_data"].get("supporting_evidence", [])))
+    cont_cnt = res["evidence_data"].get("contradicting_count", len(res["evidence_data"].get("contradicting_evidence", [])))
+    ctx_cnt = res["evidence_data"].get("contextual_count", len(res["evidence_data"].get("contextual_evidence", [])))
 
-    if verdict == "VERIFIED":
-        if supp_cnt >= 2:
-            verdict_desc = f"Available public evidence supports the central claim. {supp_cnt} supporting public sources were found and no contradictory source was identified."
+    verdict_desc = res["verdict_res"].get("decision_rationale")
+    if not verdict_desc:
+        if verdict == "VERIFIED":
+            verdict_desc = f"Available public evidence supports the central claim. {supp_cnt} supporting public source(s) found and no contradictory source identified."
+        elif verdict == "MISLEADING":
+            verdict_desc = "Elements of the claim conflict with facts, exaggerate details, or use sensational framing."
+        elif verdict == "LIKELY FAKE":
+            verdict_desc = "Available public evidence directly contradicts or refutes the central claim."
         else:
-            verdict_desc = "Available public evidence supports the central claim. 1 supporting source was found and no contradictory source was identified."
-    elif verdict == "MISLEADING":
-        verdict_desc = res["verdict_res"].get("decision_rationale") or "Elements of the claim conflict with facts, exaggerate details, or use sensational framing."
-    elif verdict == "LIKELY FAKE":
-        verdict_desc = res["verdict_res"].get("decision_rationale") or "Linguistic patterns strongly align with fabricated news and/or debunking public reports refute the claim."
-    else: # UNCERTAIN
-        verdict_desc = res["verdict_res"].get("decision_rationale") or "Evidence is insufficient or conflicting; unable to independently certify truth or falsehood."
+            verdict_desc = "Evidence is insufficient or conflicting; unable to independently certify truth or falsehood."
 
     st.markdown(f"""
     <div class="verdict-card {banner_cls}">
@@ -512,77 +593,79 @@ if st.session_state.last_verification:
         st.markdown("##### ⚖️ Verdict Fusion Rationale")
         st.markdown(structured_r.get("verdict_explanation", f"Assigned verdict: {verdict}."))
 
-    with st.expander("📋 Detailed Verification Points", expanded=False):
-        for reason in res["reasoning"]:
-            st.markdown(f"- {reason}")
+    with st.expander("📋 Detailed Verification Points", expanded=True if cont_cnt > 0 else False):
+        vp = structured_r.get("verification_points")
+        if vp:
+            col_vp1, col_vp2 = st.columns(2)
+            with col_vp1:
+                st.markdown(f"**Claim Subject:** {vp.get('claim_subject', 'N/A')}")
+                st.markdown(f"**Action:** {vp.get('action', 'N/A')}")
+                st.markdown(f"**Object / Target:** {vp.get('object', 'N/A')}")
+                st.markdown(f"**Time / Date:** {vp.get('time', 'N/A')}")
+            with col_vp2:
+                st.markdown(f"**Ranking Claimed:** {vp.get('ranking_claimed', 'N/A')}")
+                st.markdown(f"**Ranking in Evidence:** {vp.get('ranking_found_in_evidence', 'N/A')}")
+                st.markdown(f"**Classification:** `{vp.get('classification', 'N/A')}`")
+                st.markdown(f"**Reason:** {vp.get('reason', 'N/A')}")
+            st.markdown("---")
+        if res.get("reasoning"):
+            st.markdown("**Decision Engine Findings:**")
+            for reason in res["reasoning"]:
+                st.markdown(f"- {reason}")
 
     # ── FEATURE 4 & 8: Evidence Found ──
     st.markdown("### 🔍 Real Evidence Cross-Referencing")
+    if cont_cnt > 0:
+        st.error(f"🚨 **Contradictory Public Evidence Identified ({cont_cnt} source(s)):** Direct refutation found in independent public records contradicting the claim's core assertions.")
+
     if not res["evidence_data"]["is_available"]:
         st.warning("⚠️ **External evidence verification unavailable.** No matching live public reports were identified. The verdict reflects stylistic ML patterns and source metadata without hallucinating external sources.")
     else:
-        tab_supp, tab_cont, tab_ctx = st.tabs([
-            f"✅ Supporting Evidence ({len(res['evidence_data']['supporting_evidence'])})",
-            f"🚨 Contradicting Evidence ({len(res['evidence_data']['contradicting_evidence'])})",
-            f"ℹ️ Contextual References ({len(res['evidence_data']['contextual_evidence'])})"
-        ])
-
-        with tab_supp:
-            if res["evidence_data"]["supporting_evidence"]:
-                for item in res["evidence_data"]["supporting_evidence"]:
-                    dom_str = f" (`{item['domain']}`)" if item.get("domain") else ""
-                    tier_badge = item.get("tier_badge") or (f"🏛️ {item['source_tier']}" if item.get("source_tier") else "")
-                    tier_str = f" &nbsp;•&nbsp; `{tier_badge}`" if tier_badge else ""
-                    st.markdown(f"**[{item['source']}]**{dom_str} [{item['title']}]({item['url']}){tier_str}")
-                    prop_str = f" | **Proposition:** `{item.get('matched_proposition')}`" if item.get('matched_proposition') and item.get('matched_proposition') != "None" else ""
-                    rel_str = f" | **Relevance:** `{int(item.get('semantic_relevance', 0)*100)}%`" if item.get('semantic_relevance') is not None else ""
-                    st.markdown(f"**Classification:** `SUPPORTING`{rel_str}{prop_str} | **Date:** {item.get('pub_date', 'Recent')}")
-                    st.caption(f"**Snippet:** {item.get('snippet', '')}")
-                    if item.get("reason"):
-                        st.caption(f"ℹ️ *Entailment logic:* {item.get('reason')}")
-                    st.markdown("---")
-            else:
-                st.write("No direct corroborating reports found in public news feeds.")
-
-        with tab_cont:
-            if res["evidence_data"]["contradicting_evidence"]:
-                for item in res["evidence_data"]["contradicting_evidence"]:
-                    dom_str = f" (`{item['domain']}`)" if item.get("domain") else ""
-                    tier_badge = item.get("tier_badge") or (f"🏛️ {item['source_tier']}" if item.get("source_tier") else "")
-                    tier_str = f" &nbsp;•&nbsp; `{tier_badge}`" if tier_badge else ""
-                    st.markdown(f"**[{item['source']}]**{dom_str} [{item['title']}]({item['url']}){tier_str}")
-                    prop_str = f" | **Proposition:** `{item.get('matched_proposition')}`" if item.get('matched_proposition') and item.get('matched_proposition') != "None" else ""
-                    rel_str = f" | **Relevance:** `{int(item.get('semantic_relevance', 0)*100)}%`" if item.get('semantic_relevance') is not None else ""
-                    st.markdown(f"**Classification:** `CONTRADICTING`{rel_str}{prop_str} | **Date:** {item.get('pub_date', 'Recent')}")
-                    if item.get("conflict_type"):
-                        st.error(
-                            f"🚨 **Conflict Type:** {item['conflict_type']}  \n"
-                            f"• **Claim Attribute:** `{item.get('claim_attribute')}`  \n"
-                            f"• **Evidence Attribute:** `{item.get('evidence_attribute')}`"
-                        )
-                    st.caption(f"**Snippet:** {item.get('snippet', '')}")
-                    if item.get("reason"):
-                        st.caption(f"ℹ️ *Refutation logic:* {item.get('reason')}")
-                    st.markdown("---")
-            else:
-                st.write("No direct contradictory or debunking reports found.")
-
-        with tab_ctx:
-            if res["evidence_data"]["contextual_evidence"]:
-                for item in res["evidence_data"]["contextual_evidence"]:
-                    dom_str = f" (`{item['domain']}`)" if item.get("domain") else ""
-                    tier_badge = item.get("tier_badge") or (f"🏛️ {item['source_tier']}" if item.get("source_tier") else "")
-                    tier_str = f" &nbsp;•&nbsp; `{tier_badge}`" if tier_badge else ""
-                    st.markdown(f"**[{item['source']}]**{dom_str} [{item['title']}]({item['url']}){tier_str}")
-                    prop_str = f" | **Proposition:** `{item.get('matched_proposition')}`" if item.get('matched_proposition') and item.get('matched_proposition') != "None" else ""
-                    rel_str = f" | **Relevance:** `{int(item.get('semantic_relevance', 0)*100)}%`" if item.get('semantic_relevance') is not None else ""
-                    st.markdown(f"**Classification:** `CONTEXTUAL`{rel_str}{prop_str} | **Date:** {item.get('pub_date', 'Recent')}")
-                    st.caption(f"**Snippet:** {item.get('snippet', '')}")
-                    if item.get("reason"):
-                        st.caption(f"ℹ️ *Classification reason:* {item.get('reason')}")
-                    st.markdown("---")
-            else:
-                st.write("No additional background articles returned.")
+        # If contradiction exists and supporting is 0, activate Contradicting tab first so user immediately sees contradiction
+        if cont_cnt > 0 and supp_cnt == 0:
+            tab_cont, tab_ctx, tab_supp = st.tabs([
+                f"🚨 Contradicting Evidence ({cont_cnt})",
+                f"ℹ️ Contextual References ({ctx_cnt})",
+                f"✅ Supporting Evidence ({supp_cnt})"
+            ])
+            with tab_cont:
+                for idx, item in enumerate(res["evidence_data"].get("contradicting_evidence", []), 1):
+                    render_evidence_card(item, "CONTRADICTING", idx)
+            with tab_ctx:
+                if res["evidence_data"].get("contextual_evidence"):
+                    for idx, item in enumerate(res["evidence_data"]["contextual_evidence"], 1):
+                        render_evidence_card(item, "CONTEXTUAL", idx)
+                else:
+                    st.write("No additional background articles returned.")
+            with tab_supp:
+                st.warning(f"⚠️ No corroborating reports found. Note: {cont_cnt} contradictory source(s) identified refuting this claim (see Contradicting tab).")
+        else:
+            tab_supp, tab_cont, tab_ctx = st.tabs([
+                f"✅ Supporting Evidence ({supp_cnt})",
+                f"🚨 Contradicting Evidence ({cont_cnt})",
+                f"ℹ️ Contextual References ({ctx_cnt})"
+            ])
+            with tab_supp:
+                if res["evidence_data"].get("supporting_evidence"):
+                    for idx, item in enumerate(res["evidence_data"]["supporting_evidence"], 1):
+                        render_evidence_card(item, "SUPPORTING", idx)
+                else:
+                    if cont_cnt > 0:
+                        st.warning(f"⚠️ No direct corroborating reports found. Note: {cont_cnt} contradictory source(s) were identified (see Contradicting tab).")
+                    else:
+                        st.write("No direct corroborating reports found in public news feeds.")
+            with tab_cont:
+                if res["evidence_data"].get("contradicting_evidence"):
+                    for idx, item in enumerate(res["evidence_data"]["contradicting_evidence"], 1):
+                        render_evidence_card(item, "CONTRADICTING", idx)
+                else:
+                    st.write("No direct contradictory or debunking reports found.")
+            with tab_ctx:
+                if res["evidence_data"].get("contextual_evidence"):
+                    for idx, item in enumerate(res["evidence_data"]["contextual_evidence"], 1):
+                        render_evidence_card(item, "CONTEXTUAL", idx)
+                else:
+                    st.write("No additional background articles returned.")
 
         # ── Developer Debug Mode: Proposition Entailment Trace ──
         debug_trace = res["evidence_data"].get("debug_trace")
@@ -592,25 +675,50 @@ if st.session_state.last_verification:
                 st.markdown(f"**Extracted Search Query:** `{debug_trace.get('search_query', '')}`")
                 st.markdown(f"**Evidence Strength Assigned:** `{res['evidence_data'].get('evidence_strength', 'INSUFFICIENT')}`")
                 st.markdown(f"**Independent Publishers Count:** `{res['evidence_data'].get('independent_publishers_count', 0)}`")
-                st.markdown("**Claim Propositions:**")
-                for prop in debug_trace.get("claim_propositions", []):
-                    st.markdown(f"- `{prop}`")
                 
-                st.markdown("---")
-                st.markdown("**Retrieved Sources & Proposition Entailment:**")
+                # Extracted Claim Attributes
+                claim_attrs = debug_trace.get("claim_attributes", [])
+                if claim_attrs:
+                    st.markdown("#### 📌 Extracted Claim Attributes:")
+                    for ca in claim_attrs:
+                        st.markdown(f"**Proposition {ca.get('proposition_id')}:** *\"{ca.get('proposition_text')}\"*")
+                        col_ca1, col_ca2 = st.columns(2)
+                        with col_ca1:
+                            st.markdown(f"- **Subject:** `{ca.get('subject')}` ({ca.get('subject_type')})")
+                            st.markdown(f"- **Actions:** `{', '.join(ca.get('actions', []))}`")
+                            st.markdown(f"- **Objects:** `{', '.join(ca.get('objects', []))}`")
+                        with col_ca2:
+                            st.markdown(f"- **Locations:** `{', '.join(ca.get('locations', []))}` (Scope: `{ca.get('geographic_scope')}`)")
+                            st.markdown(f"- **Occurrence Years:** `{', '.join(str(y) for y in ca.get('years', []))}` (Phase: `{ca.get('event_phase')}`)")
+                            st.markdown(f"- **Rankings / Superlatives:** `{', '.join(ca.get('rankings', []))}`")
+                    st.markdown("---")
+                else:
+                    st.markdown("**Claim Propositions:**")
+                    for prop in debug_trace.get("claim_propositions", []):
+                        st.markdown(f"- `{prop}`")
+                    st.markdown("---")
+                
+                st.markdown("#### 🔬 Retrieved Sources & Proposition Entailment:")
                 evals = debug_trace.get("evaluations", [])
                 if evals:
                     for idx, ev in enumerate(evals, 1):
                         badge = "✅ SUPPORTING" if ev["classification"] == "SUPPORTING" else ("🚨 CONTRADICTING" if ev["classification"] == "CONTRADICTING" else "ℹ️ CONTEXTUAL")
                         tier_lbl = ev.get("tier_badge") or ev.get("source_tier") or "General"
-                        st.markdown(f"**{idx}. [{ev.get('source')}]** (`{ev.get('domain')}`) — `{tier_lbl}` — **{badge}**")
+                        dom_str = f" (`{ev.get('domain')}`)" if ev.get('domain') else ""
+                        url_str = f" — [Article Link]({ev.get('url')})" if ev.get('url') else ""
+                        st.markdown(f"**{idx}. [{ev.get('source')}]**{dom_str}{url_str} — `{tier_lbl}` — **{badge}**")
                         st.markdown(f"- **Source Title/Claim:** {ev.get('source_claim')}")
                         st.markdown(f"- **Semantic Relevance:** `{int(ev.get('semantic_relevance', 0)*100)}%`")
                         st.markdown(f"- **Proposition Match:** `{ev.get('proposition_match')}`")
+                        if ev.get("ranking_comparison"):
+                            st.markdown(f"- **Ranking Comparison:** `{ev.get('ranking_comparison')}`")
+                        if ev.get("scope_comparison"):
+                            st.markdown(f"- **Scope Comparison:** `{ev.get('scope_comparison')}`")
                         if ev.get("conflict_type"):
                             st.markdown(f"- 🚨 **Conflict Type:** `{ev.get('conflict_type')}` (Claim: `{ev.get('claim_attribute')}` vs Evidence: `{ev.get('evidence_attribute')}`)")
-                        st.markdown(f"- **Entailment Reason:** {ev.get('reason')}")
-                        st.caption(f"Summary: {ev.get('source_summary')}")
+                        st.markdown(f"- **Final Classification Reason:** {ev.get('final_classification_reason') or ev.get('reason')}")
+                        if ev.get("source_summary"):
+                            st.caption(f"Summary: {ev.get('source_summary')}")
                         st.markdown("---")
                 else:
                     st.write("No external source evaluations recorded.")
@@ -648,12 +756,18 @@ if st.session_state.last_verification:
         "ml_prediction": res["ml_prediction"],
         "confidence": res["confidence"],
         "verdict": res["verdict"],
+        "verdict_desc": verdict_desc,
         "evidence_status": res["evidence_status"],
+        "supporting_count": supp_cnt,
+        "contradicting_count": cont_cnt,
+        "contextual_count": ctx_cnt,
         "domain": res["source_data"]["domain"],
         "author": res["source_data"]["author"],
         "publish_date": res["source_data"]["publish_date"],
         "supporting_evidence": res["evidence_data"].get("supporting_evidence", []),
         "contradicting_evidence": res["evidence_data"].get("contradicting_evidence", []),
+        "contextual_evidence": res["evidence_data"].get("contextual_evidence", []),
+        "verification_points": structured_r.get("verification_points", {}),
         "reasoning": res["reasoning"]
     }
 

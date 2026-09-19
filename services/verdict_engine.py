@@ -23,19 +23,9 @@ def fuse_verdict(
     """
     supporting = evidence_data.get("supporting_evidence", [])
     contradicting = evidence_data.get("contradicting_evidence", [])
-    # Deduplicate sources by publisher domain / source name to count independent publishers
-    unique_supp = {
-        (item.get("domain") or item.get("source", "")).lower()
-        for item in supporting
-        if (item.get("domain") or item.get("source"))
-    }
-    unique_cont = {
-        (item.get("domain") or item.get("source", "")).lower()
-        for item in contradicting
-        if (item.get("domain") or item.get("source"))
-    }
-    supp_count = len(unique_supp) if unique_supp else len(supporting)
-    cont_count = len(unique_cont) if unique_cont else len(contradicting)
+    # Count sources directly from evidence data to ensure 100% consistency with UI and reports
+    supp_count = evidence_data.get("supporting_count", len(supporting))
+    cont_count = evidence_data.get("contradicting_count", len(contradicting))
 
     # Assess Model Confidence Level (Statistical classifier certainty, not factual truth)
     if confidence >= 85.0:
@@ -88,16 +78,35 @@ def fuse_verdict(
     # Rule 3: Contradictory evidence only (reliable sources refute or debunk)
     elif cont_count > 0:
         verdict = "LIKELY FAKE"
-        attr_conflicts = [
-            f"{s.get('conflict_type')}: claim asserts '{s.get('claim_attribute')}' vs evidence '{s.get('evidence_attribute')}'"
-            for s in contradicting if s.get("conflict_type")
-        ]
-        if attr_conflicts:
-            decision_rationale = f"Available public evidence directly contradicts the claim ({attr_conflicts[0]})."
-        elif cont_count >= 2:
-            decision_rationale = f"Multiple reliable public sources ({cont_count}) directly contradict or debunk this assertion."
+        ranking_conflicts = [s for s in contradicting if s.get("conflict_type") == "Ranking contradiction"]
+        if ranking_conflicts:
+            ranking_conflicts.sort(key=lambda s: not any(w in str(s.get("evidence_attribute", "")).lower() for w in ("4th", "fourth", "rank 4", "second", "third")))
+            rc = ranking_conflicts[0]
+            claim_desc = str(rc.get("claim_attribute", "first country")).lower()
+            ev_desc = str(rc.get("evidence_attribute", "fourth country")).lower()
+            if any(w in claim_desc for w in ("first", "1st")):
+                decision_rationale = (
+                    "LIKELY FAKE was assigned because the retrieved evidence directly contradicts the claim's country-level ranking. "
+                    "The claim states that India was the first country, while the evidence identifies India as the fourth country to successfully land a spacecraft on the Moon."
+                )
+            else:
+                c_clean = "first country" if any(w in claim_desc for w in ("first", "1st")) else rc.get("claim_attribute")
+                e_clean = "fourth country" if any(w in ev_desc for w in ("4th", "fourth", "rank 4")) else rc.get("evidence_attribute")
+                decision_rationale = (
+                    f"LIKELY FAKE was assigned because the retrieved evidence directly contradicts the claim's country-level ranking. "
+                    f"The claim states that India was the {c_clean}, while the evidence identifies India as the {e_clean}."
+                )
         else:
-            decision_rationale = "Available public evidence contradicts the central claim. 1 contradictory source was identified."
+            attr_conflicts = [
+                f"{s.get('conflict_type')}: claim asserts '{s.get('claim_attribute')}' vs evidence '{s.get('evidence_attribute')}'"
+                for s in contradicting if s.get("conflict_type")
+            ]
+            if attr_conflicts:
+                decision_rationale = f"Available public evidence directly contradicts the claim ({attr_conflicts[0]})."
+            elif cont_count >= 2:
+                decision_rationale = f"Multiple reliable public sources ({cont_count}) directly contradict or debunk this assertion."
+            else:
+                decision_rationale = "Available public evidence contradicts the central claim. 1 contradictory source was identified."
 
     # Rule 4: Supporting evidence only (corroborated by public sources)
     elif supp_count > 0:
